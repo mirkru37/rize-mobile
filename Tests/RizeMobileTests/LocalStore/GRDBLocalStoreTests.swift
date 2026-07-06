@@ -238,7 +238,10 @@ final class GRDBLocalStoreTests: XCTestCase {
         var batch = try await store.fetchUnsyncedBatch(limit: 500)
         XCTAssertEqual(batch.count, 2)
 
-        try await store.markSynced(eventIds: [event.eventId], sessionIds: [])
+        try await store.markSynced(
+            events: [SyncedEventSnapshot(eventId: event.eventId, insertedAt: event.insertedAt)],
+            sessions: []
+        )
 
         batch = try await store.fetchUnsyncedBatch(limit: 500)
         XCTAssertEqual(batch.events.count, 0)
@@ -279,8 +282,9 @@ final class GRDBLocalStoreTests: XCTestCase {
             startedAt: Date(), endedAt: Date().addingTimeInterval(60), appBundleId: "b", categoryId: nil, projectId: nil
         )
 
-        try await store.markSynced(eventIds: [eventA.eventId], sessionIds: [])
-        try await store.markSynced(eventIds: [eventA.eventId], sessionIds: []) // repeat: no-op, no error
+        let snapshotA = SyncedEventSnapshot(eventId: eventA.eventId, insertedAt: eventA.insertedAt)
+        try await store.markSynced(events: [snapshotA], sessions: [])
+        try await store.markSynced(events: [snapshotA], sessions: []) // repeat: no-op, no error
 
         let batch = try await store.fetchUnsyncedBatch(limit: 500)
         XCTAssertEqual(batch.events.count, 1)
@@ -293,10 +297,135 @@ final class GRDBLocalStoreTests: XCTestCase {
             startedAt: Date(), endedAt: Date().addingTimeInterval(60), appBundleId: "a", categoryId: nil, projectId: nil
         )
 
-        try await store.markSynced(eventIds: [], sessionIds: [])
+        try await store.markSynced(events: [], sessions: [])
 
         let batch = try await store.fetchUnsyncedBatch(limit: 500)
         XCTAssertEqual(batch.count, 1)
+    }
+
+    // MARK: markSynced guard (RIZ-46, carried over from RIZ-43 review finding M1)
+
+    func testMarkSyncedDoesNotFlagASessionEditedAfterTheBatchWasFetched() async throws {
+        let (store, clock) = try makeStore()
+        let session = try await store.startSession(kind: .focus, projectId: nil, plannedDurationS: nil, note: "v1")
+
+        // Snapshot taken "at batch-fetch time" — before the race.
+        let staleSnapshot = SyncedSessionSnapshot(id: session.id, updatedAt: session.updatedAt)
+
+        // The row changes locally while a push of the stale snapshot is
+        // hypothetically still in flight.
+        clock.advance(by: 5)
+        _ = try await store.editSession(id: session.id, projectId: nil, note: .some("v2"))
+
+        try await store.markSynced(events: [], sessions: [staleSnapshot])
+
+        let batch = try await store.fetchUnsyncedBatch(limit: 500)
+        XCTAssertTrue(
+            batch.sessions.contains { $0.id == session.id },
+            "a row edited after its batch snapshot was taken must remain pending"
+        )
+    }
+
+    func testMarkSyncedFlagsASessionUnchangedSinceTheBatchWasFetched() async throws {
+        let (store, _) = try makeStore()
+        let session = try await store.startSession(kind: .focus, projectId: nil, plannedDurationS: nil, note: nil)
+        let snapshot = SyncedSessionSnapshot(id: session.id, updatedAt: session.updatedAt)
+
+        try await store.markSynced(events: [], sessions: [snapshot])
+
+        let batch = try await store.fetchUnsyncedBatch(limit: 500)
+        XCTAssertFalse(batch.sessions.contains { $0.id == session.id })
+    }
+
+    // MARK: Applying pulled changes
+
+    func testApplyEventChangesUpsertsAndMarksSynced() async throws {
+        let (store, clock) = try makeStore()
+        let upsert = ActivityEventRecord(
+            eventId: UUID(),
+            deviceId: "other-device",
+            startedAt: clock.now(),
+            endedAt: clock.now().addingTimeInterval(60),
+            appBundleId: "remote.app",
+            insertedAt: clock.now()
+        )
+
+        try await store.applyEventChanges(upserts: [upsert], tombstoneIds: [])
+
+        let today = try await store.fetchTodayData()
+        XCTAssertTrue(today.events.contains { $0.eventId == upsert.eventId })
+
+        let batch = try await store.fetchUnsyncedBatch(limit: 500)
+        XCTAssertFalse(batch.events.contains { $0.eventId == upsert.eventId })
+    }
+
+    func testApplyEventChangesTombstonesByEventId() async throws {
+        let (store, _) = try makeStore()
+        let event = try await store.recordApproximateEvent(
+            startedAt: Date(), endedAt: Date().addingTimeInterval(60), appBundleId: "a", categoryId: nil, projectId: nil
+        )
+
+        try await store.applyEventChanges(upserts: [], tombstoneIds: [event.eventId])
+
+        let today = try await store.fetchTodayData()
+        XCTAssertFalse(today.events.contains { $0.eventId == event.eventId })
+    }
+
+    func testApplySessionChangesUpsertsWhenIncomingIsNewer() async throws {
+        let (store, clock) = try makeStore()
+        let session = try await store.startSession(kind: .focus, projectId: nil, plannedDurationS: nil, note: "v1")
+
+        clock.advance(by: 10)
+        var remoteVersion = session
+        remoteVersion.note = "v2 from another device"
+        remoteVersion.updatedAt = clock.now()
+
+        try await store.applySessionChanges(upserts: [remoteVersion], tombstoneIds: [])
+
+        let today = try await store.fetchTodayData()
+        XCTAssertEqual(today.sessions.first { $0.id == session.id }?.note, "v2 from another device")
+    }
+
+    func testApplySessionChangesIgnoresAnOlderIncomingVersion() async throws {
+        let (store, clock) = try makeStore()
+        let session = try await store.startSession(kind: .focus, projectId: nil, plannedDurationS: nil, note: "v1")
+
+        clock.advance(by: 10)
+        _ = try await store.editSession(id: session.id, projectId: nil, note: .some("v2 local"))
+
+        // A stale upsert from before the local edit must not clobber it.
+        try await store.applySessionChanges(upserts: [session], tombstoneIds: [])
+
+        let today = try await store.fetchTodayData()
+        XCTAssertEqual(today.sessions.first { $0.id == session.id }?.note, "v2 local")
+    }
+
+    func testApplySessionChangesAppliesTombstones() async throws {
+        let (store, _) = try makeStore()
+        let session = try await store.startSession(kind: .focus, projectId: nil, plannedDurationS: nil, note: nil)
+
+        try await store.applySessionChanges(upserts: [], tombstoneIds: [session.id])
+
+        let today = try await store.fetchTodayData()
+        XCTAssertFalse(today.sessions.contains { $0.id == session.id })
+    }
+
+    // MARK: Logout
+
+    func testWipeAllDataRemovesAllEventsAndSessions() async throws {
+        let (store, _) = try makeStore()
+        try await store.recordApproximateEvent(
+            startedAt: Date(), endedAt: Date().addingTimeInterval(60), appBundleId: "a", categoryId: nil, projectId: nil
+        )
+        _ = try await store.startSession(kind: .focus, projectId: nil, plannedDurationS: nil, note: nil)
+
+        try await store.wipeAllData()
+
+        let today = try await store.fetchTodayData()
+        XCTAssertTrue(today.events.isEmpty)
+        XCTAssertTrue(today.sessions.isEmpty)
+        let batch = try await store.fetchUnsyncedBatch(limit: 500)
+        XCTAssertEqual(batch.count, 0)
     }
 }
 

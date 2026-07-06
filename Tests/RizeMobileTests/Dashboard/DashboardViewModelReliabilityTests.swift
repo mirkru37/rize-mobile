@@ -203,7 +203,19 @@ private struct FailingFetchActiveRunningSessionStore: LocalStoring {
         try await wrapped.fetchUnsyncedBatch(limit: limit)
     }
 
-    func markSynced(eventIds: [UUID], sessionIds: [UUID]) async throws {
-        try await wrapped.markSynced(eventIds: eventIds, sessionIds: sessionIds)
+    func markSynced(events: [SyncedEventSnapshot], sessions: [SyncedSessionSnapshot]) async throws {
+        try await wrapped.markSynced(events: events, sessions: sessions)
+    }
+
+    func applyEventChanges(upserts: [ActivityEventRecord], tombstoneIds: [UUID]) async throws {
+        try await wrapped.applyEventChanges(upserts: upserts, tombstoneIds: tombstoneIds)
+    }
+
+    func applySessionChanges(upserts: [FocusSessionRecord], tombstoneIds: [UUID]) async throws {
+        try await wrapped.applySessionChanges(upserts: upserts, tombstoneIds: tombstoneIds)
+    }
+
+    func wipeAllData() async throws {
+        try await wrapped.wipeAllData()
     }
 }

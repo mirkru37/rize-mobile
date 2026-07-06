@@ -36,12 +36,20 @@ targets:
         TARGETED_DEVICE_FAMILY: "1,2"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         CODE_SIGN_STYLE: Automatic
+        # RIZ-46: the sync client's backend base URL, read at runtime via
+        # `BackendConfigProvider` from this Info.plist key. Override per
+        # build configuration with an xcconfig (e.g. a Staging.xcconfig
+        # setting RIZE_BACKEND_BASE_URL to a staging host) without touching
+        # this file; a `UserDefaults` override (see `BackendConfigProvider`)
+        # takes priority over this for on-device QA without a rebuild.
+        RIZE_BACKEND_BASE_URL: "http://localhost:8080"
     info:
       path: Sources/RizeMobile/App/Info.plist
       properties:
         UILaunchScreen: {}
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
+        RIZE_BACKEND_BASE_URL: "$(RIZE_BACKEND_BASE_URL)"
 
     # --------------------------------------------------------------------
     # Placeholder: DeviceActivity / FamilyControls extension targets

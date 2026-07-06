@@ -12,6 +12,7 @@ struct RootView: View {
     var environmentResult: Result<AppEnvironment, Error>
 
     @State private var selectedTab: AppTab = .dashboard
+    @Environment(\.scenePhase) private var scenePhase
 
     /// Convenience initializer for the common success case (previews, tests,
     /// and any caller that already has a live `AppEnvironment`).
@@ -41,6 +42,19 @@ struct RootView: View {
                 )
                 .tabItem { Label("Sessions", systemImage: "timer") }
                 .tag(AppTab.sessions)
+
+                AuthView(viewModel: environment.authViewModel)
+                    .tabItem { Label("Account", systemImage: "person.crop.circle") }
+                    .tag(AppTab.account)
+            }
+            // RIZ-46: trigger a sync pass whenever the app returns to the
+            // foreground, in addition to the after-session-completion
+            // trigger wired in `AppEnvironment`. `SyncClient.syncNow()`
+            // no-ops if a cycle is already in flight, so this is safe to
+            // fire alongside that trigger without double-syncing.
+            .onChange(of: scenePhase) { _, newPhase in
+                guard newPhase == .active else { return }
+                Task { await environment.syncClient.syncNow() }
             }
         case let .failure(error):
             LocalStoreErrorView(error: error)

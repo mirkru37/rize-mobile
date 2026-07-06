@@ -80,11 +80,22 @@ public final class SessionEngine {
     private let clock: Clock
     private let clockStateStore: SessionClockStoring
     private var clockState: SessionClockState?
+    /// Invoked after a session is stopped (RIZ-46), so a `SyncClient` can be
+    /// triggered to push the just-completed session promptly rather than
+    /// waiting for the next foreground event. `nil` by default so existing
+    /// callers/tests are unaffected.
+    private let onSessionCompleted: (@Sendable () -> Void)?
 
-    public init(store: LocalStoring, clock: Clock = SystemClock(), clockStateStore: SessionClockStoring) {
+    public init(
+        store: LocalStoring,
+        clock: Clock = SystemClock(),
+        clockStateStore: SessionClockStoring,
+        onSessionCompleted: (@Sendable () -> Void)? = nil
+    ) {
         self.store = store
         self.clock = clock
         self.clockStateStore = clockStateStore
+        self.onSessionCompleted = onSessionCompleted
     }
 
     // MARK: Relaunch recovery
@@ -196,6 +207,7 @@ public final class SessionEngine {
         clockStateStore.clear()
         clockState = nil
         state = .idle
+        onSessionCompleted?()
         return record
     }
 
