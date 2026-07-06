@@ -51,3 +51,29 @@ jobs:
 
       - name: SwiftFormat lint
         run: swiftformat --lint .
+
+      - name: Build unsigned Release build for simulator
+        run: |
+          xcodebuild build \
+            -project RizeMobile.xcodeproj \
+            -scheme RizeMobile \
+            -configuration Release \
+            -destination "platform=iOS Simulator,name=${{ steps.simulator.outputs.name }}" \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Zip unsigned .app artifact
+        run: |
+          APP_PATH=$(find build/Build/Products -maxdepth 2 -name "*.app" -type d -print -quit)
+          if [ -z "$APP_PATH" ]; then
+            echo "No .app product found" >&2
+            exit 1
+          fi
+          ditto -c -k --keepParent "$APP_PATH" RizeMobile-unsigned-simulator.zip
+
+      - name: Upload unsigned .app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: RizeMobile-unsigned-simulator-${{ github.sha }}
+          path: RizeMobile-unsigned-simulator.zip
+          if-no-files-found: error
