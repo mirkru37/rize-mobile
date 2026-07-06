@@ -26,13 +26,15 @@ public enum BackendConfigProvider {
 
     public static func resolve(defaults: UserDefaults = .standard, bundle: Bundle = .main) -> BackendConfig {
         if let overridden = defaults.string(forKey: backendBaseURLDefaultsKey),
-           let url = URL(string: overridden)
+           let url = URL(string: overridden),
+           url.host != nil
         {
             return BackendConfig(baseURL: url)
         }
 
         if let configured = bundle.object(forInfoDictionaryKey: infoPlistKey) as? String,
-           let url = URL(string: configured)
+           let url = URL(string: configured),
+           url.host != nil
         {
             return BackendConfig(baseURL: url)
         }

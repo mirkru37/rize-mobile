@@ -15,6 +15,19 @@ iOS client for Rize-Clone with hybrid Screen Time tracking. Part of the [Rize-Cl
 - `com.apple.developer.family-controls` — works in development with the capability enabled, but **App Store distribution requires Apple approval via their request form (typically weeks — see RIZ-20)**
 - App Groups, Sign in with Apple, Background Tasks
 
+## Configuration
+
+Build-time settings live in `Config.example.xcconfig` (committed, safe defaults) and flow through `project.yml` → `Info.plist` → app code. To override a value locally without touching git-tracked files, copy `Config.example.xcconfig` to `Config.local.xcconfig` (gitignored) and edit it there — it's included automatically by `Config.example.xcconfig` and takes precedence. Run `make generate` after changing either file to regenerate the Xcode project.
+
+xcconfig treats `//` as a comment delimiter anywhere on a line, so any URL value (in either `Config.example.xcconfig` or `Config.local.xcconfig`) must escape it with `$()`, e.g. `http:/$()/localhost:8080` — otherwise the value is silently truncated to `http:`.
+
+| Setting | Where it lives | Default | Description |
+|---|---|---|---|
+| `RIZE_BACKEND_BASE_URL` | `Config.example.xcconfig` / `Config.local.xcconfig` → Info.plist key `RIZE_BACKEND_BASE_URL` | `http://localhost:8080` | Base URL of the sync/auth API (RIZ-46), read at runtime by `BackendConfigProvider.resolve()`. |
+| `com.rizeclone.mobile.backendBaseURL` | `UserDefaults` (standard suite) | unset (falls through to the Info.plist value above) | Runtime override of the backend base URL for on-device QA/staging without a rebuild. Takes priority over the Info.plist/xcconfig value; see `BackendConfigProvider`. |
+
+Coverage thresholds and other CI-only knobs (e.g. `COVERAGE_THRESHOLD` in the `Makefile`) are not app runtime configuration and stay in `Makefile`/CI workflow files.
+
 ## Documentation
 
 - [Mobile architecture](../documentation/architecture-mobile.md)
