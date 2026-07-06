@@ -64,4 +64,23 @@ final class DashboardViewTests: XCTestCase {
 
         XCTAssertNotNil(view.body)
     }
+
+    func testRootViewRendersTheErrorStateWithoutCrashingWhenTheEnvironmentFailedToOpen() {
+        let view = RootView(environmentResult: .failure(CocoaError(.fileWriteUnknown)))
+
+        XCTAssertNotNil(view.body)
+    }
+
+    func testDashboardViewInitializesWhenTheViewModelHasALoadError() throws {
+        let store = try makeStore()
+        let observer = StubTodayDataObserver()
+        let viewModel = DashboardViewModel(store: store, observer: observer)
+        let engine = SessionEngine(store: store, clockStateStore: InMemorySessionClockStore())
+        viewModel.start()
+        observer.emitError(CocoaError(.fileReadUnknown))
+
+        let view = DashboardView(viewModel: viewModel, engine: engine, selectedTab: .constant(.dashboard))
+
+        XCTAssertNotNil(view.body)
+    }
 }
