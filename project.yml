@@ -14,6 +14,11 @@ settings:
     SWIFT_VERSION: "5.10"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
 
+packages:
+  GRDB:
+    url: https://github.com/groue/GRDB.swift.git
+    from: 7.0.0
+
 targets:
   RizeMobile:
     type: application
@@ -21,6 +26,9 @@ targets:
     deploymentTarget: "17.0"
     sources:
       - path: Sources/RizeMobile
+    dependencies:
+      - package: GRDB
+        product: GRDB
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.rizeclone.mobile
@@ -68,6 +76,8 @@ targets:
         SWIFT_VERSION: "5.10"
     dependencies:
       - target: RizeMobile
+      - package: GRDB
+        product: GRDB
 
 schemes:
   RizeMobile:
