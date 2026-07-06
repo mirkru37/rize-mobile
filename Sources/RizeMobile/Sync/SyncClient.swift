@@ -84,7 +84,7 @@ public actor SyncClient {
     func pushOutbox() async throws {
         while true {
             let batch = try await store.fetchUnsyncedBatch(limit: pushBatchLimit)
-            guard batch.count > 0 else { return }
+            guard !batch.isEmpty else { return }
 
             let items = batch.events.map { SyncPushItem(.activityEvent(ActivityEventPushData(from: $0))) }
                 + batch.sessions.map { SyncPushItem(.focusSession(FocusSessionPushData(from: $0))) }

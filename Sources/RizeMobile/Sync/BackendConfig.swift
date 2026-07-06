@@ -25,17 +25,11 @@ public enum BackendConfigProvider {
     private static let developmentFallbackString = "http://localhost:8080"
 
     public static func resolve(defaults: UserDefaults = .standard, bundle: Bundle = .main) -> BackendConfig {
-        if let overridden = defaults.string(forKey: backendBaseURLDefaultsKey),
-           let url = URL(string: overridden),
-           url.host != nil
-        {
+        if let url = validatedURL(from: defaults.string(forKey: backendBaseURLDefaultsKey)) {
             return BackendConfig(baseURL: url)
         }
 
-        if let configured = bundle.object(forInfoDictionaryKey: infoPlistKey) as? String,
-           let url = URL(string: configured),
-           url.host != nil
-        {
+        if let url = validatedURL(from: bundle.object(forInfoDictionaryKey: infoPlistKey) as? String) {
             return BackendConfig(baseURL: url)
         }
 
@@ -46,6 +40,15 @@ public enum BackendConfigProvider {
         guard let url = URL(string: developmentFallbackString) else {
             preconditionFailure("BackendConfigProvider's fallback URL literal is invalid")
         }
+        return url
+    }
+
+    /// Parses `string` into a `URL`, accepting it only if it has a `host` —
+    /// rejects empty strings, malformed values, and bare paths so a
+    /// misconfigured override/Info.plist entry falls through to the next
+    /// seam in priority order rather than silently producing a hostless URL.
+    private static func validatedURL(from string: String?) -> URL? {
+        guard let string, let url = URL(string: string), url.host != nil else { return nil }
         return url
     }
 }
