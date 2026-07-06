@@ -14,12 +14,54 @@ struct AppEnvironment {
     let sessionEngine: SessionEngine
     let dashboardViewModel: DashboardViewModel
     let historyViewModel: SessionHistoryViewModel
+    let authService: AuthService
+    let syncClient: SyncClient
+    let authViewModel: AuthViewModel
 
-    private init(database: AppDatabase, deviceId: String) {
+    private init(
+        database: AppDatabase,
+        deviceId: String,
+        backendConfig: BackendConfig,
+        keychain: KeychainStoring
+    ) {
         self.database = database
         let store = GRDBLocalStore(database: database, deviceId: deviceId)
         self.store = store
-        sessionEngine = SessionEngine(store: store, clockStateStore: UserDefaultsSessionClockStore())
+
+        let apiClient = APIClient(config: backendConfig)
+        // Shared with `SyncClient` below so a logout-triggered cursor reset
+        // (see `AuthService.clearLocalSession()`) is visible to the same
+        // store the next pull reads from — two separate instances would
+        // silently defeat the reset.
+        let cursorStore = UserDefaultsSyncCursorStore()
+        let authService = AuthService(
+            apiClient: apiClient,
+            keychain: keychain,
+            localStore: store,
+            cursorStore: cursorStore,
+            deviceInfoProvider: { DeviceInfoProvider.current(deviceId: deviceId) }
+        )
+        authService.bootstrap()
+        self.authService = authService
+
+        let syncClient = SyncClient(
+            apiClient: apiClient,
+            authService: authService,
+            store: store,
+            cursorStore: cursorStore,
+            deviceId: deviceId
+        )
+        self.syncClient = syncClient
+        authViewModel = AuthViewModel(authService: authService, syncClient: syncClient)
+
+        sessionEngine = SessionEngine(
+            store: store,
+            clockStateStore: UserDefaultsSessionClockStore(),
+            // RIZ-46: trigger a sync pass once a session completes, in
+            // addition to the app-foreground trigger, so a just-finished
+            // session doesn't wait for the next relaunch/foreground to push.
+            onSessionCompleted: { Task { await syncClient.syncNow() } }
+        )
         dashboardViewModel = DashboardViewModel(
             store: store,
             observer: GRDBTodayDataObserver(database: database)
@@ -40,17 +82,27 @@ struct AppEnvironment {
     static func live() -> Result<AppEnvironment, Error> {
         Result {
             let database = try AppDatabase.onDisk(path: onDiskDatabasePath())
-            return AppEnvironment(database: database, deviceId: DeviceIdProvider.currentDeviceId())
+            return AppEnvironment(
+                database: database,
+                deviceId: DeviceIdProvider.currentDeviceId(),
+                backendConfig: BackendConfigProvider.resolve(),
+                keychain: KeychainStore()
+            )
         }
     }
 
     /// An isolated, ephemeral environment for SwiftUI previews and tests, so
     /// they never share or persist state across runs or touch the on-disk
-    /// database.
+    /// database or the real Keychain.
     static func inMemory() -> AppEnvironment {
         do {
             let database = try AppDatabase.inMemory()
-            return AppEnvironment(database: database, deviceId: "preview-device")
+            return AppEnvironment(
+                database: database,
+                deviceId: "preview-device",
+                backendConfig: BackendConfig(baseURL: BackendConfigProvider.developmentFallback),
+                keychain: InMemoryKeychainStore()
+            )
         } catch {
             fatalError("Failed to open the in-memory local store: \(error)")
         }

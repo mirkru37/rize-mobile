@@ -195,35 +195,99 @@ public final class GRDBLocalStore: LocalStoring {
         }
     }
 
-    public func markSynced(eventIds: [UUID], sessionIds: [UUID]) async throws {
-        guard !eventIds.isEmpty || !sessionIds.isEmpty else { return }
+    public func markSynced(events: [SyncedEventSnapshot], sessions: [SyncedSessionSnapshot]) async throws {
+        guard !events.isEmpty || !sessions.isEmpty else { return }
         let now = clock.now()
 
         try await database.dbWriter.write { db in
-            if !eventIds.isEmpty {
-                var arguments: [(any DatabaseValueConvertible)?] = [now]
-                arguments.append(contentsOf: eventIds.map(\.uuidString))
+            for event in events {
                 try db.execute(
                     sql: """
                     UPDATE \(ActivityEventRecord.databaseTableName)
                     SET syncedAt = ?
-                    WHERE eventId IN (\(eventIds.map { _ in "?" }.joined(separator: ",")))
+                    WHERE eventId = ? AND insertedAt = ?
                     """,
-                    arguments: StatementArguments(arguments)
+                    arguments: [now, event.eventId.uuidString, event.insertedAt]
                 )
             }
-            if !sessionIds.isEmpty {
-                var arguments: [(any DatabaseValueConvertible)?] = [now]
-                arguments.append(contentsOf: sessionIds.map(\.uuidString))
+            for session in sessions {
                 try db.execute(
                     sql: """
                     UPDATE \(FocusSessionRecord.databaseTableName)
                     SET syncedAt = ?
-                    WHERE id IN (\(sessionIds.map { _ in "?" }.joined(separator: ",")))
+                    WHERE id = ? AND updatedAt = ?
                     """,
-                    arguments: StatementArguments(arguments)
+                    arguments: [now, session.id.uuidString, session.updatedAt]
                 )
             }
+        }
+    }
+
+    // MARK: Applying pulled changes
+
+    public func applyEventChanges(upserts: [ActivityEventRecord], tombstoneIds: [UUID]) async throws {
+        guard !upserts.isEmpty || !tombstoneIds.isEmpty else { return }
+        let now = clock.now()
+
+        try await database.dbWriter.write { db in
+            for var upsert in upserts {
+                upsert.syncedAt = now
+                try upsert.save(db)
+            }
+            for tombstoneId in tombstoneIds {
+                try db.execute(
+                    sql: """
+                    UPDATE \(ActivityEventRecord.databaseTableName)
+                    SET deleted = 1, syncedAt = ?
+                    WHERE eventId = ?
+                    """,
+                    arguments: [now, tombstoneId.uuidString]
+                )
+            }
+        }
+    }
+
+    public func applySessionChanges(upserts: [FocusSessionRecord], tombstoneIds: [UUID]) async throws {
+        guard !upserts.isEmpty || !tombstoneIds.isEmpty else { return }
+        let now = clock.now()
+
+        try await database.dbWriter.write { db in
+            for var upsert in upserts {
+                let existing = try FocusSessionRecord.fetchOne(db, key: upsert.id.uuidString)
+                // LWW: only apply the incoming row if it is not older than
+                // what's already stored locally. Ties favor the server, which
+                // has already resolved LWW authoritatively.
+                if let existing, existing.updatedAt > upsert.updatedAt {
+                    continue
+                }
+                upsert.syncedAt = now
+                try upsert.save(db)
+            }
+            for tombstoneId in tombstoneIds {
+                guard let existing = try FocusSessionRecord.fetchOne(db, key: tombstoneId.uuidString) else {
+                    continue
+                }
+                if existing.deletedAt != nil {
+                    continue
+                }
+                try db.execute(
+                    sql: """
+                    UPDATE \(FocusSessionRecord.databaseTableName)
+                    SET deletedAt = ?, updatedAt = ?, syncedAt = ?
+                    WHERE id = ?
+                    """,
+                    arguments: [now, now, now, tombstoneId.uuidString]
+                )
+            }
+        }
+    }
+
+    // MARK: Logout
+
+    public func wipeAllData() async throws {
+        try await database.dbWriter.write { db in
+            try db.execute(sql: "DELETE FROM \(ActivityEventRecord.databaseTableName)")
+            try db.execute(sql: "DELETE FROM \(FocusSessionRecord.databaseTableName)")
         }
     }
 }

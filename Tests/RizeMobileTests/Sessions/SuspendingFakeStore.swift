@@ -105,5 +105,11 @@ final class SuspendingFakeStore: LocalStoring, @unchecked Sendable {
         UnsyncedBatch()
     }
 
-    func markSynced(eventIds _: [UUID], sessionIds _: [UUID]) async throws {}
+    func markSynced(events _: [SyncedEventSnapshot], sessions _: [SyncedSessionSnapshot]) async throws {}
+
+    func applyEventChanges(upserts _: [ActivityEventRecord], tombstoneIds _: [UUID]) async throws {}
+
+    func applySessionChanges(upserts _: [FocusSessionRecord], tombstoneIds _: [UUID]) async throws {}
+
+    func wipeAllData() async throws {}
 }

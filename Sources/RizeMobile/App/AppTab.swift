@@ -4,4 +4,5 @@ import Foundation
 enum AppTab: Hashable {
     case dashboard
     case sessions
+    case account
 }

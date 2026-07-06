@@ -31,6 +31,39 @@ public struct TodayData: Equatable, Sendable {
     }
 }
 
+/// A snapshot of a Tier B event's version-relevant fields at the moment it
+/// was read into a push batch. `insertedAt` never changes after creation
+/// (Tier B events have no in-place mutation path today), so the guard below
+/// always matches for events — it exists for symmetry with
+/// `SyncedSessionSnapshot` and so a future mutation path (e.g. an event-level
+/// tombstone) is covered automatically.
+public struct SyncedEventSnapshot: Equatable, Sendable {
+    public var eventId: UUID
+    public var insertedAt: Date
+
+    public init(eventId: UUID, insertedAt: Date) {
+        self.eventId = eventId
+        self.insertedAt = insertedAt
+    }
+}
+
+/// A snapshot of a Tier C session's version-relevant field (`updatedAt`) at
+/// the moment it was read into a push batch. Passed back into `markSynced`
+/// so the store can detect a local edit that raced with an in-flight push
+/// (RIZ-43 review finding M1): `editSession`/`stopSession`/`deleteSession`
+/// all bump `updatedAt`, so a mismatch means the row changed after the batch
+/// was fetched and must not be marked synced, or the newer local edit would
+/// be silently dropped from the next outbox pass.
+public struct SyncedSessionSnapshot: Equatable, Sendable {
+    public var id: UUID
+    public var updatedAt: Date
+
+    public init(id: UUID, updatedAt: Date) {
+        self.id = id
+        self.updatedAt = updatedAt
+    }
+}
+
 /// The on-device local store's public API.
 ///
 /// This is the seam between the main app / sync client and the concrete
@@ -98,8 +131,48 @@ public protocol LocalStoring: Sendable {
     /// [[sync-protocol]]'s 500-items-per-batch cap.
     func fetchUnsyncedBatch(limit: Int) async throws -> UnsyncedBatch
 
-    /// Marks the given event/session ids as synced as of now, e.g. after a
-    /// push batch comes back with `applied` or `duplicate` results per
+    /// Marks the given events/sessions as synced as of now, e.g. after a push
+    /// batch comes back with `applied` or `duplicate` results per
     /// [[sync-protocol]].
-    func markSynced(eventIds: [UUID], sessionIds: [UUID]) async throws
+    ///
+    /// **Guard (RIZ-46, carried over from RIZ-43 review finding M1):** a row
+    /// is only flipped to synced if its *current* version-relevant field
+    /// (`updatedAt` for sessions, `insertedAt` for events) still matches the
+    /// snapshot the caller took when the batch was originally fetched for
+    /// push. If the row changed locally in the meantime (e.g. the user edited
+    /// a session while its push was in flight), that row is left pending so
+    /// the newer local state is not silently skipped on the next sync pass.
+    func markSynced(events: [SyncedEventSnapshot], sessions: [SyncedSessionSnapshot]) async throws
+
+    // MARK: Applying pulled changes
+
+    /// Applies a page of pulled Tier B `activity_events` upserts/tombstones
+    /// from `GET /v1/sync/changes`. Append-only entity per [[sync-protocol]]:
+    /// an upsert is an unconditional insert-or-replace by `eventId` (no LWW
+    /// comparison needed), and a tombstone sets `deleted = true`. Applied rows
+    /// are marked `syncedAt = now`, since a row just pulled from the server is
+    /// by definition consistent with it.
+    func applyEventChanges(upserts: [ActivityEventRecord], tombstoneIds: [UUID]) async throws
+
+    /// Applies a page of pulled Tier C `focus_sessions` upserts/tombstones
+    /// from `GET /v1/sync/changes`, using last-write-wins semantics per
+    /// [[sync-protocol]]: an incoming upsert only overwrites a locally-known
+    /// row if its `updatedAt` is not older than the local row's `updatedAt`
+    /// (a tie favors the incoming server row, since the server has already
+    /// resolved LWW authoritatively). Applied rows are marked
+    /// `syncedAt = now`.
+    func applySessionChanges(upserts: [FocusSessionRecord], tombstoneIds: [UUID]) async throws
+
+    // MARK: Logout
+
+    /// Wipes all locally stored events and sessions.
+    ///
+    /// This app is single-user-per-install, so on logout there is no
+    /// multi-account local cache to preserve — signing out means the local
+    /// data belongs to an account this install is no longer authenticated as,
+    /// and keeping it around would let a subsequent sign-in (as a different
+    /// user, on a shared/reset device) see a previous user's tracked
+    /// activity. The device id is deliberately untouched by this call (see
+    /// `AuthService.logout()`).
+    func wipeAllData() async throws
 }
