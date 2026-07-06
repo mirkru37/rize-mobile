@@ -9,8 +9,12 @@ on:
 env:
   # RIZ-47/RIZ-66: minimum acceptable app-target line coverage, percent.
   # Raise this over time as coverage improves; keep it as the single knob
-  # for the gate.
-  COVERAGE_THRESHOLD: 90
+  # for the gate. RIZ-66 raised actual coverage from 70.62% to 86.15%;
+  # the remaining gap to 90% is concentrated in SwiftUI view bodies with
+  # little to no extractable logic (see the PR description for the
+  # per-file breakdown) — 80 is the threshold the user signed off on
+  # given that ceiling.
+  COVERAGE_THRESHOLD: 80
 
 jobs:
   build-and-test:
