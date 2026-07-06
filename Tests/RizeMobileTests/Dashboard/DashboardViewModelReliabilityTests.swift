@@ -38,9 +38,21 @@ final class DashboardViewModelReliabilityTests: XCTestCase {
 
     /// Polls `condition` until it's true, yielding between checks, matching
     /// `DashboardViewModelTests`'s pattern for deterministically awaiting an
-    /// async effect without a fixed `sleep`.
-    private func waitUntil(_ condition: @MainActor () -> Bool) async throws {
+    /// async effect without a fixed `sleep` — but bounded by `timeout`, so a
+    /// condition that (due to a bug) never becomes true fails the test
+    /// instead of hanging it indefinitely (RIZ-45 CI hang fix).
+    private func waitUntil(
+        timeout: TimeInterval = 5,
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        _ condition: @MainActor () -> Bool
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
         while !condition() {
+            if Date() >= deadline {
+                XCTFail("Timed out after \(timeout)s waiting for condition", file: file, line: line)
+                return
+            }
             await Task.yield()
         }
     }

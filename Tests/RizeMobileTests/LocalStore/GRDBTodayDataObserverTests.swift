@@ -85,17 +85,47 @@ final class GRDBTodayDataObserverTests: XCTestCase {
         defer { token.cancel() }
         try await waitUntil { received.count >= 1 }
 
-        // Force the tracked query to fail on its next run.
+        // Force the tracked query to fail on its next run by inserting a row
+        // with an invalid `id` — `FocusSessionRecord.init(row:)` throws for
+        // that (see the model's hand-written `FetchableRecord` conformance),
+        // so re-running `fetchTodayData` after this write fails decoding.
+        //
+        // This is a genuine INSERT (a data change, not a schema change like
+        // `DROP TABLE`), so it reliably fires GRDB's change-tracking hook and
+        // triggers a re-run of the tracked query — a schema-level change
+        // isn't guaranteed to do so, which previously left this test's
+        // `waitUntil` spinning forever (RIZ-45 CI hang fix).
         try await database.dbWriter.write { db in
-            try db.drop(table: FocusSessionRecord.databaseTableName)
+            try db.execute(
+                sql: """
+                INSERT INTO focusSessions (id, deviceId, kind, startedAt, status, createdAt, updatedAt)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                arguments: ["not-a-uuid", "test-device", "focus", clock.now(), "running", clock.now(), clock.now()]
+            )
         }
 
         try await waitUntil { receivedErrors.count >= 1 }
         XCTAssertGreaterThanOrEqual(receivedErrors.count, 1)
     }
 
-    private func waitUntil(_ condition: @Sendable () -> Bool) async throws {
+    /// Polls `condition` until it's true, yielding between checks, matching
+    /// `DashboardViewModelTests`'s pattern for deterministically awaiting an
+    /// async effect without a fixed `sleep` — but bounded by `timeout`, so a
+    /// condition that (due to a bug) never becomes true fails the test
+    /// instead of hanging it indefinitely.
+    private func waitUntil(
+        timeout: TimeInterval = 5,
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        _ condition: @Sendable () -> Bool
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
         while !condition() {
+            if Date() >= deadline {
+                XCTFail("Timed out after \(timeout)s waiting for condition", file: file, line: line)
+                return
+            }
             await Task.yield()
         }
     }
