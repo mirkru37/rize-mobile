@@ -47,11 +47,37 @@ final class SessionViewsTests: XCTestCase {
         XCTAssertNotNil(view.body)
     }
 
+    func testRunningSessionViewRendersThePausedAndNoteBranchesWhenPausedWithANote() throws {
+        let engine = try makeEngine()
+        let snapshot = SessionSnapshot(
+            id: UUID(), kind: .meeting, projectId: nil, note: "Standup", plannedDurationS: nil, startedAt: Date()
+        )
+
+        let view = RunningSessionView(engine: engine, snapshot: snapshot, isPaused: true)
+
+        XCTAssertTrue(view.isPaused)
+        XCTAssertNotNil(view.body)
+    }
+
     func testSessionHistoryViewInitializes() throws {
         let database = try AppDatabase.inMemory()
         let store = GRDBLocalStore(database: database, deviceId: "test-device")
         let viewModel = SessionHistoryViewModel(store: store)
 
+        let view = SessionHistoryView(viewModel: viewModel)
+
+        XCTAssertNotNil(view.body)
+    }
+
+    func testSessionHistoryViewRendersTheListWhenSessionsArePresent() async throws {
+        let database = try AppDatabase.inMemory()
+        let store = GRDBLocalStore(database: database, deviceId: "test-device")
+        let session = try await store.startSession(kind: .focus, projectId: nil, plannedDurationS: nil, note: "note")
+        _ = try await store.stopSession(id: session.id, status: .completed)
+        let viewModel = SessionHistoryViewModel(store: store)
+        try await viewModel.refresh()
+
+        XCTAssertEqual(viewModel.sessions.map(\.id), [session.id])
         let view = SessionHistoryView(viewModel: viewModel)
 
         XCTAssertNotNil(view.body)
@@ -99,5 +125,53 @@ final class SessionViewsTests: XCTestCase {
         let now = Date(timeIntervalSince1970: 900)
 
         XCTAssertEqual(RunningSessionView.wallClockSpan(now: now, startedAt: startedAt), 0)
+    }
+
+    // MARK: HH:MM:SS formatting (RIZ-66)
+
+    func testFormatRendersHoursMinutesAndSeconds() {
+        XCTAssertEqual(RunningSessionView.format(3725), "01:02:05")
+    }
+
+    func testFormatRendersZeroPaddedForSubHourDurations() {
+        XCTAssertEqual(RunningSessionView.format(65), "00:01:05")
+    }
+
+    func testFormatClampsNegativeIntervalsToZero() {
+        XCTAssertEqual(RunningSessionView.format(-10), "00:00:00")
+    }
+
+    // MARK: SessionsView engine-state branches (RIZ-66)
+
+    func testSessionsViewShowsRunningSessionViewWhenEngineIsRunning() async throws {
+        let engine = try makeEngine()
+        let historyViewModel = try SessionHistoryViewModel(store: makeStore())
+        _ = try await engine.start(kind: .focus)
+
+        guard case .running = engine.state else {
+            return XCTFail("expected engine to be running after start()")
+        }
+        let view = SessionsView(engine: engine, historyViewModel: historyViewModel)
+
+        XCTAssertNotNil(view.body)
+    }
+
+    func testSessionsViewShowsRunningSessionViewWhenEngineIsPaused() async throws {
+        let engine = try makeEngine()
+        let historyViewModel = try SessionHistoryViewModel(store: makeStore())
+        _ = try await engine.start(kind: .focus)
+        try engine.pause()
+
+        guard case .paused = engine.state else {
+            return XCTFail("expected engine to be paused after pause()")
+        }
+        let view = SessionsView(engine: engine, historyViewModel: historyViewModel)
+
+        XCTAssertNotNil(view.body)
+    }
+
+    private func makeStore() throws -> GRDBLocalStore {
+        let database = try AppDatabase.inMemory()
+        return GRDBLocalStore(database: database, deviceId: "test-device")
     }
 }

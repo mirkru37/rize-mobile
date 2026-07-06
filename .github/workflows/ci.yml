@@ -7,9 +7,10 @@ on:
       - main
 
 env:
-  # RIZ-47: minimum acceptable app-target line coverage, percent. Raise this
-  # over time as coverage improves; keep it as the single knob for the gate.
-  COVERAGE_THRESHOLD: 50
+  # RIZ-47/RIZ-66: minimum acceptable app-target line coverage, percent.
+  # Raise this over time as coverage improves; keep it as the single knob
+  # for the gate.
+  COVERAGE_THRESHOLD: 90
 
 jobs:
   build-and-test:
