@@ -5,6 +5,12 @@ import SwiftUI
 ///
 /// Stopping reuses `SessionEngine.stop(completed:)` — this view never talks
 /// to `LocalStoring` directly, matching `RunningSessionView`'s convention.
+///
+/// Per the same honesty-parity decision as `RunningSessionView`, the primary
+/// figure is the wall-clock span (includes any paused time) and a caption
+/// discloses that; the pause-excluding "active" time from
+/// `SessionEngine.elapsed(now:)` is shown as a secondary line, matching
+/// `RunningSessionView`'s layout.
 struct DashboardRunningSessionBanner: View {
     var engine: SessionEngine
     var session: FocusSessionRecord
@@ -24,9 +30,21 @@ struct DashboardRunningSessionBanner: View {
                 Text(session.kind.displayName)
                     .font(.headline)
                 Spacer()
-                Text(DashboardViewModel.formattedDuration(DashboardViewModel.wallClockDuration(of: session, now: now)))
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(
+                        DashboardViewModel
+                            .formattedDuration(DashboardViewModel.wallClockDuration(of: session, now: now))
+                    )
                     .font(.system(.body, design: .monospaced))
+                    Text("Active (excl. pauses): \(DashboardViewModel.formattedDuration(engine.elapsed(now: now)))")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
+
+            Text("Recorded duration includes any paused time.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
 
             Button("Stop", role: .destructive) {
                 stop()
