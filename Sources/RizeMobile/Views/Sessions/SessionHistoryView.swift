@@ -76,7 +76,13 @@ struct SessionHistoryView: View {
 
 /// `FocusSessionRecord` isn't `Identifiable`, so this local wrapper drives
 /// `.sheet(item:)` without adding a conformance to the local-store model.
-private struct EditingSession: Identifiable {
+///
+/// Internal (rather than `private`) so RIZ-66's coverage work can construct
+/// `SessionRow`/`EditSessionNoteSheet` directly in tests, matching this
+/// repo's convention for `DashboardSessionRow`/`DashboardEmptyStateView`
+/// (small view components are independently testable rather than only
+/// reachable through their parent's `body`).
+struct EditingSession: Identifiable {
     var session: FocusSessionRecord
     var id: UUID {
         session.id
@@ -85,7 +91,7 @@ private struct EditingSession: Identifiable {
 
 /// A minimal sheet for editing a session's note. Project/tag fields are left
 /// alone, per the Tier C edit scope for this view.
-private struct EditSessionNoteSheet: View {
+struct EditSessionNoteSheet: View {
     let session: FocusSessionRecord
     let onSave: (String?) -> Void
 
@@ -120,7 +126,7 @@ private struct EditSessionNoteSheet: View {
     }
 }
 
-private struct SessionRow: View {
+struct SessionRow: View {
     let session: FocusSessionRecord
 
     var body: some View {
