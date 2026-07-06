@@ -47,6 +47,7 @@ public final class AuthService {
     private let apiClient: APIClientProtocol
     private let keychain: KeychainStoring
     private let localStore: LocalStoring
+    private let cursorStore: SyncCursorStoring
     private let deviceInfoProvider: @Sendable () -> DeviceInfo
     private var refreshTask: Task<String, Error>?
 
@@ -54,11 +55,13 @@ public final class AuthService {
         apiClient: APIClientProtocol,
         keychain: KeychainStoring,
         localStore: LocalStoring,
+        cursorStore: SyncCursorStoring,
         deviceInfoProvider: @escaping @Sendable () -> DeviceInfo
     ) {
         self.apiClient = apiClient
         self.keychain = keychain
         self.localStore = localStore
+        self.cursorStore = cursorStore
         self.deviceInfoProvider = deviceInfoProvider
     }
 
@@ -187,6 +190,13 @@ public final class AuthService {
         keychain.delete(key: Self.signedInEmailKey)
         state = .signedOut
         lastSyncAt = nil
+        // Reset the pull cursor in the same code path as the wipe below —
+        // per [[sync-protocol]] §Device Restore, a wiped local store must
+        // always be paired with a cleared cursor so the next pull is a full
+        // re-pull from the server rather than resuming from a stale
+        // `server_seq`, which would otherwise silently drop every row that
+        // was already synced before this logout.
+        cursorStore.saveCursor(nil)
         // Best-effort: a failure here leaves stale local rows behind rather
         // than crashing the sign-out flow, which must always complete.
         try? await localStore.wipeAllData()

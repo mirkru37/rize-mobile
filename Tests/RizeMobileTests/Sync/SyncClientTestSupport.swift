@@ -12,12 +12,17 @@ enum SyncClientTestSupport {
     /// configuring the push/pull/refresh results the test actually cares
     /// about.
     @MainActor
-    static func makeAuthService(apiClient: MockAPIClient, store: LocalStoring) async throws -> AuthService {
+    static func makeAuthService(
+        apiClient: MockAPIClient,
+        store: LocalStoring,
+        cursorStore: SyncCursorStoring = InMemorySyncCursorStore()
+    ) async throws -> AuthService {
         let keychain = InMemoryKeychainStore()
         let service = AuthService(
             apiClient: apiClient,
             keychain: keychain,
             localStore: store,
+            cursorStore: cursorStore,
             deviceInfoProvider: {
                 DeviceInfo(platform: "ios", name: "Test", model: "Test", osVersion: "17.0", appVersion: "1.0")
             }

@@ -29,10 +29,16 @@ struct AppEnvironment {
         self.store = store
 
         let apiClient = APIClient(config: backendConfig)
+        // Shared with `SyncClient` below so a logout-triggered cursor reset
+        // (see `AuthService.clearLocalSession()`) is visible to the same
+        // store the next pull reads from — two separate instances would
+        // silently defeat the reset.
+        let cursorStore = UserDefaultsSyncCursorStore()
         let authService = AuthService(
             apiClient: apiClient,
             keychain: keychain,
             localStore: store,
+            cursorStore: cursorStore,
             deviceInfoProvider: { DeviceInfoProvider.current(deviceId: deviceId) }
         )
         authService.bootstrap()
@@ -42,7 +48,7 @@ struct AppEnvironment {
             apiClient: apiClient,
             authService: authService,
             store: store,
-            cursorStore: UserDefaultsSyncCursorStore(),
+            cursorStore: cursorStore,
             deviceId: deviceId
         )
         self.syncClient = syncClient

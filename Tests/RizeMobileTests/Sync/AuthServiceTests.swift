@@ -6,12 +6,14 @@ final class AuthServiceTests: XCTestCase {
     private func makeService(
         apiClient: MockAPIClient = MockAPIClient(),
         keychain: InMemoryKeychainStore = InMemoryKeychainStore(),
-        store: SpyLocalStore = SpyLocalStore()
+        store: SpyLocalStore = SpyLocalStore(),
+        cursorStore: InMemorySyncCursorStore = InMemorySyncCursorStore()
     ) -> (AuthService, MockAPIClient, InMemoryKeychainStore, SpyLocalStore) {
         let service = AuthService(
             apiClient: apiClient,
             keychain: keychain,
             localStore: store,
+            cursorStore: cursorStore,
             deviceInfoProvider: {
                 DeviceInfo(platform: "ios", name: "Test", model: "Test", osVersion: "17.0", appVersion: "1.0")
             }
@@ -111,6 +113,38 @@ final class AuthServiceTests: XCTestCase {
         XCTAssertEqual(service.state, .signedOut)
         XCTAssertNil(keychain.read(key: "com.rizeclone.mobile.refreshToken"))
         XCTAssertEqual(store.wipeAllDataCallCount, 1)
+    }
+
+    /// RIZ-46 H1: logout must reset the pull cursor alongside the local
+    /// wipe, or the next pull resumes from a stale `server_seq` and silently
+    /// drops every previously-synced row — see [[sync-protocol]] §Device
+    /// Restore.
+    func testLogoutResetsSyncCursor() async throws {
+        let cursorStore = InMemorySyncCursorStore()
+        cursorStore.saveCursor("cursor-123")
+        let (service, apiClient, _, _) = makeService(cursorStore: cursorStore)
+        apiClient.loginResult = .success(makeAuthResponse())
+        try await service.login(email: "a@b.com", password: "password123")
+
+        await service.logout()
+
+        XCTAssertNil(cursorStore.loadCursor())
+    }
+
+    /// The cursor reset must happen even when the best-effort server logout
+    /// call fails — it lives in `clearLocalSession()`, the same code path as
+    /// the local wipe, not gated on the network call succeeding.
+    func testLogoutResetsSyncCursorEvenIfTheServerCallFails() async throws {
+        let cursorStore = InMemorySyncCursorStore()
+        cursorStore.saveCursor("cursor-456")
+        let (service, apiClient, _, _) = makeService(cursorStore: cursorStore)
+        apiClient.loginResult = .success(makeAuthResponse())
+        try await service.login(email: "a@b.com", password: "password123")
+        apiClient.logoutResult = .failure(SyncStubError())
+
+        await service.logout()
+
+        XCTAssertNil(cursorStore.loadCursor())
     }
 
     // MARK: Refresh
