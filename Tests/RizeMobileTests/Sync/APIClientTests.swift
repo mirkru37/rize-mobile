@@ -165,22 +165,3 @@ private final class StubHTTPTransport: HTTPTransport, @unchecked Sendable {
         return (data, response)
     }
 }
-
-/// A small `async`-aware `XCTAssertThrowsError` shim, since the stdlib macro
-/// doesn't support `await`ing the expression directly. Takes an explicit
-/// closure (rather than `@autoclosure`) so its own internal `await` can't be
-/// hoisted by SwiftFormat into the call site, which would otherwise strip it
-/// from this file's `async` expressions and fail to compile.
-private func XCTAssertThrowsErrorAsync(
-    _ operation: () async throws -> some Any,
-    _ errorHandler: (Error) -> Void,
-    file: StaticString = #filePath,
-    line: UInt = #line
-) async {
-    do {
-        _ = try await operation()
-        XCTFail("expected an error to be thrown", file: file, line: line)
-    } catch {
-        errorHandler(error)
-    }
-}
