@@ -70,7 +70,7 @@ private extension UUID {
         let uuidBytes = uuid
         return [
             uuidBytes.0, uuidBytes.1, uuidBytes.2, uuidBytes.3,
-            uuidBytes.4, uuidBytes.5, uuidBytes.6, uuidBytes.7
+            uuidBytes.4, uuidBytes.5, uuidBytes.6, uuidBytes.7,
         ]
     }
 }

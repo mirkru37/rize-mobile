@@ -31,3 +31,6 @@ identifier_name:
     - id
 
 reporter: "xcode"
+
+trailing_comma:
+  mandatory_comma: true
