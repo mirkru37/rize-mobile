@@ -9,6 +9,12 @@ DerivedData/
 *.dSYM.zip
 *.dSYM
 
+# RIZ-47: local coverage run outputs (mirrors CI's coverage gate)
+*.xcresult
+coverage-report.txt
+coverage-report.json
+coverage-summary.txt
+
 # macOS
 .DS_Store
 
