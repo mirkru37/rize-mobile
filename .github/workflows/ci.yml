@@ -7,13 +7,24 @@ on:
       - main
 
 env:
-  # RIZ-47: minimum acceptable app-target line coverage, percent. Raise this
-  # over time as coverage improves; keep it as the single knob for the gate.
-  COVERAGE_THRESHOLD: 50
+  # RIZ-47/RIZ-66: minimum acceptable app-target line coverage, percent.
+  # Raise this over time as coverage improves; keep it as the single knob
+  # for the gate. RIZ-66 raised actual coverage from 70.62% to 86.15%;
+  # the remaining gap to 90% is concentrated in SwiftUI view bodies with
+  # little to no extractable logic (see the PR description for the
+  # per-file breakdown) — 80 is the threshold the user signed off on
+  # given that ceiling.
+  COVERAGE_THRESHOLD: 80
 
 jobs:
   build-and-test:
     runs-on: macos-15
+    # RIZ-66: a full run (build + test + lint + release build) normally
+    # completes in ~5-8 minutes; a hung test (e.g. an unbounded wait on a
+    # condition a bug never satisfies) would otherwise burn macOS runner
+    # minutes — billed at a higher multiplier than Linux — for hours.
+    # Bounds that failure mode to a fast, cheap failure instead.
+    timeout-minutes: 20
     permissions:
       contents: read
       pull-requests: write

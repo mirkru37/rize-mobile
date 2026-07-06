@@ -18,6 +18,8 @@ final class MockAPIClient: APIClientProtocol, @unchecked Sendable {
         .success(SyncPullResponse(changes: SyncChanges(), nextCursor: nil, hasMore: false)),
     ]
 
+    private(set) var registerCallCount = 0
+    private(set) var loginCallCount = 0
     private(set) var refreshCallCount = 0
     private(set) var logoutCallCount = 0
     private(set) var pushCallCount = 0
@@ -34,11 +36,17 @@ final class MockAPIClient: APIClientProtocol, @unchecked Sendable {
     var onPushEvents: (@Sendable () async -> Void)?
 
     func register(email _: String, password _: String, device _: DeviceInfo) async throws -> AuthResponse {
-        try registerResult.get()
+        lock.lock()
+        registerCallCount += 1
+        lock.unlock()
+        return try registerResult.get()
     }
 
     func login(email _: String, password _: String, device _: DeviceInfo) async throws -> AuthResponse {
-        try loginResult.get()
+        lock.lock()
+        loginCallCount += 1
+        lock.unlock()
+        return try loginResult.get()
     }
 
     func refresh(refreshToken _: String, device _: DeviceInfo?) async throws -> AuthResponse {

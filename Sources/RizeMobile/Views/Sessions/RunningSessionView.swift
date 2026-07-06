@@ -105,7 +105,11 @@ struct RunningSessionView: View {
         max(0, now.timeIntervalSince(startedAt))
     }
 
-    private static func format(_ interval: TimeInterval) -> String {
+    /// Formats a `TimeInterval` as `HH:MM:SS`. Internal (rather than
+    /// `private`) so RIZ-66's coverage work can assert its rounding/clamping
+    /// behavior directly — this view's `body` alone can't exercise every
+    /// boundary (e.g. an interval `>= 1h`) without a live `TimelineView` tick.
+    static func format(_ interval: TimeInterval) -> String {
         let totalSeconds = max(0, Int(interval))
         let hours = totalSeconds / 3600
         let minutes = (totalSeconds % 3600) / 60
