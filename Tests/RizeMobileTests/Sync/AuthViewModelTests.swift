@@ -125,10 +125,17 @@ final class AuthViewModelTests: XCTestCase {
 
     func testSyncNowDelegatesToSyncClient() async {
         let harness = makeHarness()
+        // A sync cycle's pull step needs a valid access token, which
+        // requires having signed in first — otherwise `SyncClient.syncNow()`
+        // fails at the auth step before ever reaching the pull, and
+        // `syncNow()` swallows that failure by design (see `SyncClient`).
+        harness.apiClient.loginResult = .success(Support.makeAuthResponse(accessToken: "at-1"))
+        await harness.viewModel.submit()
+        let pullCallCountAfterSubmit = harness.apiClient.pullCallCount
 
         await harness.viewModel.syncNow()
 
-        XCTAssertEqual(harness.apiClient.pullCallCount, 1)
+        XCTAssertEqual(harness.apiClient.pullCallCount, pullCallCountAfterSubmit + 1)
     }
 
     // MARK: Mode.submitTitle

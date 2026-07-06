@@ -25,7 +25,7 @@ final class DashboardViewBranchTests: XCTestCase {
         }
     }
 
-    func testDashboardViewRendersHistorySectionWithCompletedSessions() throws {
+    func testDashboardViewRendersHistorySectionWithCompletedSessions() async throws {
         let store = try makeStore()
         let observer = StubTodayDataObserver()
         let viewModel = DashboardViewModel(store: store, observer: observer)
@@ -42,6 +42,7 @@ final class DashboardViewBranchTests: XCTestCase {
         )
         viewModel.start()
         observer.emit(TodayData(sessions: [session]))
+        try await waitUntil { viewModel.sessions.count == 1 }
 
         XCTAssertEqual(viewModel.sessions.map(\.id), [session.id])
         let view = DashboardView(viewModel: viewModel, engine: engine, selectedTab: .constant(.dashboard))
