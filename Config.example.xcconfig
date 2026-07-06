@@ -1,0 +1,25 @@
+// Example build-time configuration for RizeMobile.
+//
+// This file is committed and provides safe defaults for every
+// configurable build setting, so `make generate`/`make build`/`make test`
+// work out of the box on a fresh clone with no setup.
+//
+// To override any value locally (e.g. to point at a staging backend)
+// without touching this file or project.yml, and without committing your
+// change:
+//   1. Copy this file to `Config.local.xcconfig` (already gitignored).
+//   2. Set the values you want to override there.
+//   3. Run `make generate` to regenerate the Xcode project.
+// The #include? below pulls in Config.local.xcconfig if it exists, and its
+// settings win because the include is last in this file.
+
+// RIZ-46: the sync/auth API's base URL. Flows through project.yml's
+// `configFiles` into this xcconfig, then into Info.plist's
+// RIZE_BACKEND_BASE_URL key, and is read at runtime by
+// `BackendConfigProvider.resolve()`. A `UserDefaults` override
+// (`BackendConfigProvider.backendBaseURLDefaultsKey`) still takes priority
+// over this value at runtime, for on-device QA without a rebuild.
+RIZE_BACKEND_BASE_URL = http://localhost:8080
+
+// Local overrides — must stay last so Config.local.xcconfig wins.
+#include? "Config.local.xcconfig"
