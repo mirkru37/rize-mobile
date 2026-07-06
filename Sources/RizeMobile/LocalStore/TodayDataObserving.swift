@@ -15,5 +15,13 @@ public protocol TodayDataObserving: Sendable {
     /// with the current value, and again whenever the underlying data
     /// changes, until the returned token is cancelled (or, for GRDB-backed
     /// implementations, deallocated).
-    func observeTodayData(onChange: @escaping @Sendable (TodayData) -> Void) -> any ObservationToken
+    ///
+    /// `onError` is invoked if the underlying observation itself fails (e.g.
+    /// the tracked query errors out) — this is distinct from there simply
+    /// being no data yet, and callers should surface it as a degraded-state
+    /// signal rather than silently dropping it.
+    func observeTodayData(
+        onChange: @escaping @Sendable (TodayData) -> Void,
+        onError: @escaping @Sendable (Error) -> Void
+    ) -> any ObservationToken
 }

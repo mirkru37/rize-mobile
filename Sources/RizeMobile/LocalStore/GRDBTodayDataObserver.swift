@@ -1,5 +1,6 @@
 import Foundation
 import GRDB
+import os
 
 /// GRDB `ValueObservation`-backed `TodayDataObserving`.
 ///
@@ -10,6 +11,8 @@ import GRDB
 /// lockstep with `fetchTodayData()` by inspection; both filter
 /// non-tombstoned rows to the calendar day containing "now".
 public final class GRDBTodayDataObserver: TodayDataObserving {
+    private static let logger = Logger(subsystem: "com.rizeclone.mobile", category: "GRDBTodayDataObserver")
+
     private let database: AppDatabase
     private let calendar: Calendar
     private let clock: Clock
@@ -20,7 +23,10 @@ public final class GRDBTodayDataObserver: TodayDataObserving {
         self.clock = clock
     }
 
-    public func observeTodayData(onChange: @escaping @Sendable (TodayData) -> Void) -> any ObservationToken {
+    public func observeTodayData(
+        onChange: @escaping @Sendable (TodayData) -> Void,
+        onError: @escaping @Sendable (Error) -> Void
+    ) -> any ObservationToken {
         let calendar = calendar
         let clock = clock
         let observation = ValueObservation.tracking { db in
@@ -28,7 +34,10 @@ public final class GRDBTodayDataObserver: TodayDataObserving {
         }
         let cancellable = observation.start(
             in: database.dbWriter,
-            onError: { _ in },
+            onError: { error in
+                Self.logger.error("today-data observation failed: \(String(describing: error), privacy: .public)")
+                onError(error)
+            },
             onChange: onChange
         )
         return GRDBCancellableToken(cancellable: cancellable)

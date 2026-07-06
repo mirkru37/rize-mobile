@@ -1,6 +1,29 @@
 import Foundation
 import Observation
 
+/// Distinguishes an actual fetch/observation failure from the ordinary "no
+/// session is currently running" state (which is simply `activeRunningSession
+/// == nil`, not an error). Surfaced by `DashboardViewModel.loadError` as a
+/// small non-blocking banner in `DashboardView`, since the dashboard's data
+/// may still be showing a stale-but-valid snapshot.
+public enum DashboardLoadError: Error, Equatable {
+    /// The underlying `TodayDataObserving` subscription itself failed (e.g.
+    /// the tracked query errored out).
+    case todayDataObservationFailed
+    /// `LocalStoring.fetchActiveRunningSession()` threw.
+    case activeRunningSessionFetchFailed
+
+    /// User-facing, non-blocking banner copy.
+    public var bannerMessage: String {
+        switch self {
+        case .todayDataObservationFailed:
+            "Couldn't refresh today's sessions. Showing the last known data."
+        case .activeRunningSessionFetchFailed:
+            "Couldn't check for a running session. Pull to refresh or reopen the app."
+        }
+    }
+}
+
 /// Drives the dashboard's "today" summary: today's Tier C sessions and the
 /// currently-running session, kept live off `LocalStoring`/`TodayDataObserving`.
 ///
@@ -23,6 +46,12 @@ public final class DashboardViewModel {
     /// so a session started before midnight still drives the banner.
     public private(set) var activeRunningSession: FocusSessionRecord?
 
+    /// Set when either the underlying `TodayDataObserving` subscription or
+    /// `LocalStoring.fetchActiveRunningSession()` fails; `nil` while things
+    /// are working normally (including when there's simply no running
+    /// session). See `DashboardLoadError`.
+    public private(set) var loadError: DashboardLoadError?
+
     private let store: LocalStoring
     private let observer: TodayDataObserving
     /// GRDB's underlying cancellable (see `GRDBTodayDataObserver`) stops the
@@ -41,11 +70,29 @@ public final class DashboardViewModel {
     /// prior observation is cancelled first.
     public func start() {
         observationToken?.cancel()
-        observationToken = observer.observeTodayData { [weak self] today in
-            Task { @MainActor in
-                self?.apply(today)
+        observationToken = observer.observeTodayData(
+            onChange: { [weak self] today in
+                Task { @MainActor in
+                    self?.apply(today)
+                }
+            },
+            onError: { [weak self] _ in
+                Task { @MainActor in
+                    self?.loadError = .todayDataObservationFailed
+                }
             }
-        }
+        )
+    }
+
+    /// Cancels the current observation, if any. Call when the dashboard is
+    /// no longer visible (e.g. from the view's `.onDisappear`) so the
+    /// underlying `ValueObservation` work — and its retention of this view
+    /// model via the `onChange`/`onError` closures — doesn't keep running
+    /// while the dashboard isn't on screen. Safe to call more than once, and
+    /// safe to call `start()` again afterwards.
+    public func stop() {
+        observationToken?.cancel()
+        observationToken = nil
     }
 
     /// Applies a fresh `TodayData` snapshot and kicks off a re-fetch of the
@@ -53,6 +100,7 @@ public final class DashboardViewModel {
     /// transition (running -> completed/abandoned, or a brand new start) is
     /// exactly the kind of change `TodayDataObserving` reports.
     private func apply(_ today: TodayData) {
+        loadError = nil
         sessions = today.sessions.sorted { $0.startedAt > $1.startedAt }
         refreshActiveRunningSession()
     }
@@ -60,7 +108,12 @@ public final class DashboardViewModel {
     private func refreshActiveRunningSession() {
         Task { @MainActor [weak self] in
             guard let self else { return }
-            activeRunningSession = try? await store.fetchActiveRunningSession()
+            do {
+                activeRunningSession = try await store.fetchActiveRunningSession()
+                loadError = nil
+            } catch {
+                loadError = .activeRunningSessionFetchFailed
+            }
         }
     }
 
