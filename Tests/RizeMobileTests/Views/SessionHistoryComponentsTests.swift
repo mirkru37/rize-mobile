@@ -26,9 +26,9 @@ final class SessionHistoryComponentsTests: XCTestCase {
             kind: .meeting,
             startedAt: Date(),
             status: .completed,
+            note: "Standup notes",
             createdAt: Date(),
-            updatedAt: Date(),
-            note: "Standup notes"
+            updatedAt: Date()
         )
 
         let row = SessionRow(session: session)
@@ -60,9 +60,9 @@ final class SessionHistoryComponentsTests: XCTestCase {
             kind: .focus,
             startedAt: Date(),
             status: .completed,
+            note: "Existing note",
             createdAt: Date(),
-            updatedAt: Date(),
-            note: "Existing note"
+            updatedAt: Date()
         )
         var savedNote: String??
         let sheet = EditSessionNoteSheet(session: session, onSave: { savedNote = $0 })
