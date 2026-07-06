@@ -1,12 +1,13 @@
 import Foundation
 @testable import RizeMobile
 
-/// A `LocalStoring` fake whose `startSession`/`fetchTodayData` suspend until
-/// the test explicitly releases them, so tests can deterministically land a
-/// second call inside the window where a first call is still awaiting the
-/// store — the exact reentrancy window `SessionEngine`'s `isMutating` guard
-/// closes. Only the methods exercised by the reentrancy/recovery tests are
-/// implemented for real; the rest are unused stubs.
+/// A `LocalStoring` fake whose `startSession`/`fetchActiveRunningSession`
+/// suspend until the test explicitly releases them, so tests can
+/// deterministically land a second call inside the window where a first call
+/// is still awaiting the store — the exact reentrancy window
+/// `SessionEngine`'s `isMutating` guard closes. Only the methods exercised by
+/// the reentrancy/recovery tests are implemented for real; the rest are
+/// unused stubs.
 final class SuspendingFakeStore: LocalStoring, @unchecked Sendable {
     private let lock = NSLock()
     private var startContinuation: CheckedContinuation<Void, Never>?
@@ -24,6 +25,7 @@ final class SuspendingFakeStore: LocalStoring, @unchecked Sendable {
         updatedAt: Date()
     )
     var todayDataToReturn = TodayData()
+    var activeRunningSessionToReturn: FocusSessionRecord?
 
     /// Resumes a `startSession` call currently suspended inside this fake.
     func releaseStart() {
@@ -34,7 +36,8 @@ final class SuspendingFakeStore: LocalStoring, @unchecked Sendable {
         continuation?.resume()
     }
 
-    /// Resumes a `fetchTodayData` call currently suspended inside this fake.
+    /// Resumes a `fetchActiveRunningSession` call currently suspended inside
+    /// this fake.
     func releaseFetch() {
         lock.lock()
         let continuation = fetchContinuation
@@ -83,6 +86,10 @@ final class SuspendingFakeStore: LocalStoring, @unchecked Sendable {
     }
 
     func fetchTodayData() async throws -> TodayData {
+        todayDataToReturn
+    }
+
+    func fetchActiveRunningSession() async throws -> FocusSessionRecord? {
         lock.lock()
         fetchCallCount += 1
         lock.unlock()
@@ -91,7 +98,7 @@ final class SuspendingFakeStore: LocalStoring, @unchecked Sendable {
             fetchContinuation = continuation
             lock.unlock()
         }
-        return todayDataToReturn
+        return activeRunningSessionToReturn
     }
 
     func fetchUnsyncedBatch(limit _: Int) async throws -> UnsyncedBatch {
