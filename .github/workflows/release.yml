@@ -1,0 +1,71 @@
+name: Release
+
+# Scaffolding-only release workflow (RIZ-25). This produces an UNSIGNED
+# simulator build archived as a zipped .app for internal verification
+# purposes only. There is no code signing set up yet, so no .ipa is
+# produced and nothing is published to TestFlight / the App Store.
+# Real device signing + IPA export is a later ticket, gated on the
+# Apple Developer Program setup and the family-controls entitlement
+# approval (RIZ-20).
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-unsigned-simulator-artifact:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tooling
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Select simulator destination
+        id: simulator
+        run: |
+          DEVICE=$(xcrun simctl list devices available | grep -m1 -E "iPhone (1[5-9]|[2-9][0-9])" | sed -E 's/^[[:space:]]*//; s/ \(.*$//')
+          if [ -z "$DEVICE" ]; then
+            DEVICE=$(xcrun simctl list devices available | grep -m1 "iPhone" | sed -E 's/^[[:space:]]*//; s/ \(.*$//')
+          fi
+          echo "Using simulator: $DEVICE"
+          echo "name=$DEVICE" >> "$GITHUB_OUTPUT"
+
+      - name: Build unsigned Release build for simulator
+        run: |
+          xcodebuild build \
+            -project RizeMobile.xcodeproj \
+            -scheme RizeMobile \
+            -configuration Release \
+            -destination "platform=iOS Simulator,name=${{ steps.simulator.outputs.name }}" \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Zip .app artifact
+        run: |
+          APP_PATH=$(find build/Build/Products -maxdepth 2 -name "*.app" -type d -print -quit)
+          if [ -z "$APP_PATH" ]; then
+            echo "No .app product found" >&2
+            exit 1
+          fi
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" RizeMobile-simulator-unsigned.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: RizeMobile-simulator-unsigned.zip
+          body: |
+            Unsigned iOS Simulator build of RizeMobile (tag ${{ github.ref_name }}).
+
+            This is a scaffolding-only artifact for internal verification:
+            it targets the iOS Simulator only, is not code-signed, and is
+            NOT an installable .ipa for real devices. Device signing and
+            App Store / TestFlight distribution are tracked in a later
+            ticket, pending Apple Developer Program setup and the
+            family-controls entitlement approval (RIZ-20).

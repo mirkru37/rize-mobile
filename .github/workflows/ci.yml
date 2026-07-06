@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-test:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tooling
+        run: brew install xcodegen swiftlint swiftformat
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Select simulator destination
+        id: simulator
+        run: |
+          DEVICE=$(xcrun simctl list devices available | grep -m1 -E "iPhone (1[5-9]|[2-9][0-9])" | sed -E 's/^[[:space:]]*//; s/ \(.*$//')
+          if [ -z "$DEVICE" ]; then
+            DEVICE=$(xcrun simctl list devices available | grep -m1 "iPhone" | sed -E 's/^[[:space:]]*//; s/ \(.*$//')
+          fi
+          echo "Using simulator: $DEVICE"
+          echo "name=$DEVICE" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: |
+          xcodebuild build \
+            -project RizeMobile.xcodeproj \
+            -scheme RizeMobile \
+            -destination "platform=iOS Simulator,name=${{ steps.simulator.outputs.name }}" \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: Test
+        run: |
+          xcodebuild test \
+            -project RizeMobile.xcodeproj \
+            -scheme RizeMobile \
+            -destination "platform=iOS Simulator,name=${{ steps.simulator.outputs.name }}" \
+            CODE_SIGNING_ALLOWED=NO
+
+      - name: SwiftLint
+        run: swiftlint --strict
+
+      - name: SwiftFormat lint
+        run: swiftformat --lint .
