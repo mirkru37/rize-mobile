@@ -19,7 +19,12 @@
 // `BackendConfigProvider.resolve()`. A `UserDefaults` override
 // (`BackendConfigProvider.backendBaseURLDefaultsKey`) still takes priority
 // over this value at runtime, for on-device QA without a rebuild.
-RIZE_BACKEND_BASE_URL = http://localhost:8080
+// xcconfig treats `//` as a comment delimiter anywhere on a line, so a raw
+// `http://...` value here would be truncated to `http:`. `$()` is xcconfig's
+// empty-variable-reference escape: it expands to nothing but splits the
+// `//` so the parser doesn't treat it as a comment. Do not "simplify" this
+// back to `http://localhost:8080` — that reintroduces the truncation bug.
+RIZE_BACKEND_BASE_URL = http:/$()/localhost:8080
 
 // Local overrides — must stay last so Config.local.xcconfig wins.
 #include? "Config.local.xcconfig"

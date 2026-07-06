@@ -19,6 +19,8 @@ iOS client for Rize-Clone with hybrid Screen Time tracking. Part of the [Rize-Cl
 
 Build-time settings live in `Config.example.xcconfig` (committed, safe defaults) and flow through `project.yml` → `Info.plist` → app code. To override a value locally without touching git-tracked files, copy `Config.example.xcconfig` to `Config.local.xcconfig` (gitignored) and edit it there — it's included automatically by `Config.example.xcconfig` and takes precedence. Run `make generate` after changing either file to regenerate the Xcode project.
 
+xcconfig treats `//` as a comment delimiter anywhere on a line, so any URL value (in either `Config.example.xcconfig` or `Config.local.xcconfig`) must escape it with `$()`, e.g. `http:/$()/localhost:8080` — otherwise the value is silently truncated to `http:`.
+
 | Setting | Where it lives | Default | Description |
 |---|---|---|---|
 | `RIZE_BACKEND_BASE_URL` | `Config.example.xcconfig` / `Config.local.xcconfig` → Info.plist key `RIZE_BACKEND_BASE_URL` | `http://localhost:8080` | Base URL of the sync/auth API (RIZ-46), read at runtime by `BackendConfigProvider.resolve()`. |
