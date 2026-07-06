@@ -62,13 +62,13 @@ public final class UUIDv7Generator: @unchecked Sendable {
         // Bytes 8...15: rand_b (62 random bits), with the variant (10) in
         // the top two bits of byte 8 per RFC 9562.
         var randomTail = [UInt8](repeating: 0, count: 8)
-        for i in 0 ..< 8 {
-            randomTail[i] = UInt8.random(in: 0 ... 255)
+        for byteIndex in 0 ..< 8 {
+            randomTail[byteIndex] = UInt8.random(in: 0 ... 255)
         }
         randomTail[0] = (randomTail[0] & 0x3F) | 0x80
 
-        for i in 0 ..< 8 {
-            bytes[8 + i] = randomTail[i]
+        for byteIndex in 0 ..< 8 {
+            bytes[8 + byteIndex] = randomTail[byteIndex]
         }
 
         return UUID(uuid: (

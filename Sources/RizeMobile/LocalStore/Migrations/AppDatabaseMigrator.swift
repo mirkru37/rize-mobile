@@ -11,56 +11,63 @@ enum AppDatabaseMigrator {
         var migrator = DatabaseMigrator()
 
         migrator.registerMigration("v1_create_local_store") { db in
-            try db.create(table: ActivityEventRecord.databaseTableName) { t in
-                t.column("eventId", .text).primaryKey()
-                t.column("deviceId", .text).notNull()
-                t.column("startedAt", .datetime).notNull()
-                t.column("endedAt", .datetime).notNull()
-                t.column("appBundleId", .text)
-                t.column("categoryId", .text)
-                t.column("projectId", .text)
-                t.column("deleted", .boolean).notNull().defaults(to: false)
-                t.column("insertedAt", .datetime).notNull()
-                t.column("syncedAt", .datetime)
-            }
-            try db.create(
-                index: "idx_activityEvents_startedAt",
-                on: ActivityEventRecord.databaseTableName,
-                columns: ["startedAt"]
-            )
-            try db.create(
-                index: "idx_activityEvents_syncedAt",
-                on: ActivityEventRecord.databaseTableName,
-                columns: ["syncedAt"]
-            )
-
-            try db.create(table: FocusSessionRecord.databaseTableName) { t in
-                t.column("id", .text).primaryKey()
-                t.column("deviceId", .text).notNull()
-                t.column("projectId", .text)
-                t.column("kind", .text).notNull()
-                t.column("plannedDurationS", .integer)
-                t.column("startedAt", .datetime).notNull()
-                t.column("endedAt", .datetime)
-                t.column("status", .text).notNull()
-                t.column("note", .text)
-                t.column("createdAt", .datetime).notNull()
-                t.column("updatedAt", .datetime).notNull()
-                t.column("deletedAt", .datetime)
-                t.column("syncedAt", .datetime)
-            }
-            try db.create(
-                index: "idx_focusSessions_startedAt",
-                on: FocusSessionRecord.databaseTableName,
-                columns: ["startedAt"]
-            )
-            try db.create(
-                index: "idx_focusSessions_syncedAt",
-                on: FocusSessionRecord.databaseTableName,
-                columns: ["syncedAt"]
-            )
+            try createActivityEvents(db)
+            try createFocusSessions(db)
         }
 
         return migrator
+    }
+
+    private static func createActivityEvents(_ db: Database) throws {
+        try db.create(table: ActivityEventRecord.databaseTableName) { table in
+            table.column("eventId", .text).primaryKey()
+            table.column("deviceId", .text).notNull()
+            table.column("startedAt", .datetime).notNull()
+            table.column("endedAt", .datetime).notNull()
+            table.column("appBundleId", .text)
+            table.column("categoryId", .text)
+            table.column("projectId", .text)
+            table.column("deleted", .boolean).notNull().defaults(to: false)
+            table.column("insertedAt", .datetime).notNull()
+            table.column("syncedAt", .datetime)
+        }
+        try db.create(
+            index: "idx_activityEvents_startedAt",
+            on: ActivityEventRecord.databaseTableName,
+            columns: ["startedAt"]
+        )
+        try db.create(
+            index: "idx_activityEvents_syncedAt",
+            on: ActivityEventRecord.databaseTableName,
+            columns: ["syncedAt"]
+        )
+    }
+
+    private static func createFocusSessions(_ db: Database) throws {
+        try db.create(table: FocusSessionRecord.databaseTableName) { table in
+            table.column("id", .text).primaryKey()
+            table.column("deviceId", .text).notNull()
+            table.column("projectId", .text)
+            table.column("kind", .text).notNull()
+            table.column("plannedDurationS", .integer)
+            table.column("startedAt", .datetime).notNull()
+            table.column("endedAt", .datetime)
+            table.column("status", .text).notNull()
+            table.column("note", .text)
+            table.column("createdAt", .datetime).notNull()
+            table.column("updatedAt", .datetime).notNull()
+            table.column("deletedAt", .datetime)
+            table.column("syncedAt", .datetime)
+        }
+        try db.create(
+            index: "idx_focusSessions_startedAt",
+            on: FocusSessionRecord.databaseTableName,
+            columns: ["startedAt"]
+        )
+        try db.create(
+            index: "idx_focusSessions_syncedAt",
+            on: FocusSessionRecord.databaseTableName,
+            columns: ["syncedAt"]
+        )
     }
 }

@@ -50,11 +50,14 @@ final class GRDBLocalStoreTests: XCTestCase {
         let (store, _) = try makeStore()
         let unknownId = UUID()
 
-        await XCTAssertThrowsErrorAsync({
-            try await store.stopSession(id: unknownId, status: .completed)
-        }) { error in
-            XCTAssertEqual(error as? LocalStoreError, .sessionNotFound(unknownId))
-        }
+        await XCTAssertThrowsErrorAsync(
+            {
+                try await store.stopSession(id: unknownId, status: .completed)
+            },
+            { error in
+                XCTAssertEqual(error as? LocalStoreError, .sessionNotFound(unknownId))
+            }
+        )
     }
 
     func testEditSessionUpdatesProjectAndNoteAndBumpsUpdatedAt() async throws {
@@ -210,11 +213,11 @@ final class GRDBLocalStoreTests: XCTestCase {
     func testFetchUnsyncedBatchRespectsCombinedLimitAcrossEntityTypes() async throws {
         let (store, _) = try makeStore()
 
-        for i in 0 ..< 3 {
+        for eventIndex in 0 ..< 3 {
             try await store.recordApproximateEvent(
-                startedAt: Date().addingTimeInterval(Double(i)),
-                endedAt: Date().addingTimeInterval(Double(i) + 60),
-                appBundleId: "app-\(i)",
+                startedAt: Date().addingTimeInterval(Double(eventIndex)),
+                endedAt: Date().addingTimeInterval(Double(eventIndex) + 60),
+                appBundleId: "app-\(eventIndex)",
                 categoryId: nil,
                 projectId: nil
             )

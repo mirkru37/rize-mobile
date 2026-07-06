@@ -67,7 +67,10 @@ private extension UUID {
     /// The first 8 bytes (48-bit timestamp + version/counter), which is the
     /// portion of a UUIDv7 that determines its sort order.
     var timeOrderingBytes: [UInt8] {
-        let u = uuid
-        return [u.0, u.1, u.2, u.3, u.4, u.5, u.6, u.7]
+        let uuidBytes = uuid
+        return [
+            uuidBytes.0, uuidBytes.1, uuidBytes.2, uuidBytes.3,
+            uuidBytes.4, uuidBytes.5, uuidBytes.6, uuidBytes.7,
+        ]
     }
 }
