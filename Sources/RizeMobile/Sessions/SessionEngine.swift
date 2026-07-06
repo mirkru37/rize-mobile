@@ -66,6 +66,16 @@ public enum SessionEngineError: Error, Equatable {
 public final class SessionEngine {
     public private(set) var state: SessionEngineState = .idle
 
+    /// `true` while `start`/`stop` is between its synchronous guard and its
+    /// commit of the new state, i.e. currently awaiting the store. `@MainActor`
+    /// is reentrant across suspension points, so this synchronous flag — set
+    /// before the first `await` — is what actually prevents two concurrent
+    /// calls from both passing the `.idle`/active guard (the guard alone is
+    /// not enough: a second call can run its synchronous prefix while the
+    /// first is suspended awaiting the store). Exposed so UI can disable
+    /// Start/Stop controls while a mutation is in flight.
+    public private(set) var isMutating = false
+
     private let store: LocalStoring
     private let clock: Clock
     private let clockStateStore: SessionClockStoring
@@ -85,12 +95,20 @@ public final class SessionEngine {
     ///
     /// Note: this relies on `LocalStoring.fetchTodayData()`, which is scoped
     /// to the current calendar day; a session still running across a
-    /// midnight boundary will not be recovered by this call.
+    /// midnight boundary will not be recovered by this call. When no running
+    /// session is found, only the in-memory state is reset to `.idle` — the
+    /// persisted clock state is left intact rather than cleared, since a
+    /// future day-agnostic fetch may still need it to recover pause state.
     public func recoverRunningSession() async throws {
+        guard case .idle = state, !isMutating else { return }
+
         let today = try await store.fetchTodayData()
+
+        // A concurrent start()/stop() may have already committed a new state
+        // while this call was awaiting the store above; never clobber it.
+        guard case .idle = state, !isMutating else { return }
+
         guard let running = today.sessions.first(where: { $0.status == .running && $0.deletedAt == nil }) else {
-            clockStateStore.clear()
-            clockState = nil
             state = .idle
             return
         }
@@ -104,7 +122,8 @@ public final class SessionEngine {
     // MARK: Lifecycle
 
     /// Starts a new manual timer / focus session. Throws `sessionAlreadyActive`
-    /// if a session is already running or paused.
+    /// if a session is already running or paused, or if a start/stop mutation
+    /// is already in flight.
     @discardableResult
     public func start(
         kind: FocusSessionKind,
@@ -112,7 +131,9 @@ public final class SessionEngine {
         plannedDurationS: Int? = nil,
         note: String? = nil
     ) async throws -> SessionSnapshot {
-        guard case .idle = state else { throw SessionEngineError.sessionAlreadyActive }
+        guard case .idle = state, !isMutating else { throw SessionEngineError.sessionAlreadyActive }
+        isMutating = true
+        defer { isMutating = false }
 
         let record = try await store.startSession(
             kind: kind,
@@ -120,6 +141,12 @@ public final class SessionEngine {
             plannedDurationS: plannedDurationS,
             note: note
         )
+
+        // Defensive re-check: nothing else should have been able to commit a
+        // transition while isMutating was true, but never overwrite a state
+        // that has already moved away from .idle.
+        guard case .idle = state else { throw SessionEngineError.sessionAlreadyActive }
+
         let newClockState = SessionClockState(startedAt: record.startedAt)
         clockState = newClockState
         clockStateStore.save(newClockState, sessionId: record.id)
@@ -154,12 +181,17 @@ public final class SessionEngine {
 
     /// Stops the active session (running or paused), persisting it as
     /// `completed` or `abandoned`. Clears the pause-state persistence, since
-    /// a stopped session has nothing left to recover on relaunch.
+    /// a stopped session has nothing left to recover on relaunch. Throws
+    /// `noActiveSession` if idle or if a start/stop mutation is already in
+    /// flight.
     @discardableResult
     public func stop(completed: Bool) async throws -> FocusSessionRecord {
-        guard let snapshot = state.snapshot else {
+        guard !isMutating, let snapshot = state.snapshot else {
             throw SessionEngineError.noActiveSession
         }
+        isMutating = true
+        defer { isMutating = false }
+
         let record = try await store.stopSession(id: snapshot.id, status: completed ? .completed : .abandoned)
         clockStateStore.clear()
         clockState = nil

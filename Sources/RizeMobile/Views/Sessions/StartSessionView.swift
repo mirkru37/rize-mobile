@@ -39,6 +39,7 @@ struct StartSessionView: View {
             Button("Start Session") {
                 start()
             }
+            .disabled(engine.isMutating)
         }
         .navigationTitle("New Session")
     }
