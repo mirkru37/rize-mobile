@@ -16,11 +16,23 @@ final class DashboardViewBranchTests: XCTestCase {
         return GRDBLocalStore(database: database, deviceId: "test-device")
     }
 
-    /// Matches `DashboardViewModelTests`' pattern for deterministically
-    /// awaiting the view model's async `apply`/`refreshActiveRunningSession`
-    /// effects without a fixed `sleep`.
-    private func waitUntil(_ condition: @MainActor () -> Bool) async throws {
+    /// Deterministically awaits the view model's async `apply`/
+    /// `refreshActiveRunningSession` effects without a fixed `sleep` —
+    /// bounded (unlike some pre-existing `waitUntil` helpers elsewhere in
+    /// this test target) so a genuine regression fails fast with a clear
+    /// message instead of hanging the CI runner.
+    private func waitUntil(
+        timeout: TimeInterval = 5,
+        _ condition: @MainActor () -> Bool,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
         while !condition() {
+            if Date() >= deadline {
+                XCTFail("condition not satisfied within \(timeout)s", file: file, line: line)
+                return
+            }
             await Task.yield()
         }
     }

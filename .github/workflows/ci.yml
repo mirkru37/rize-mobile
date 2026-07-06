@@ -15,6 +15,12 @@ env:
 jobs:
   build-and-test:
     runs-on: macos-15
+    # RIZ-66: a full run (build + test + lint + release build) normally
+    # completes in ~5-8 minutes; a hung test (e.g. an unbounded wait on a
+    # condition a bug never satisfies) would otherwise burn macOS runner
+    # minutes — billed at a higher multiplier than Linux — for hours.
+    # Bounds that failure mode to a fast, cheap failure instead.
+    timeout-minutes: 20
     permissions:
       contents: read
       pull-requests: write
