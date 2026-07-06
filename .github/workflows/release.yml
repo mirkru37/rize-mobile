@@ -49,7 +49,7 @@ jobs:
 
       - name: Zip .app artifact
         run: |
-          APP_PATH=$(find build/Build/Products -maxdepth 1 -name "*.app" -print -quit)
+          APP_PATH=$(find build/Build/Products -maxdepth 2 -name "*.app" -type d -print -quit)
           if [ -z "$APP_PATH" ]; then
             echo "No .app product found" >&2
             exit 1
