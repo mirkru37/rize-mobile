@@ -27,9 +27,20 @@ enum DeviceIdProvider {
     /// first call. Every subsequent call (including across app relaunches,
     /// reinstalls that restore Keychain data, and app updates) returns the
     /// same value.
+    ///
+    /// `idGenerator` is a seam over first-call id generation (production
+    /// defaults to `generateDeviceId()`, i.e. `UIDevice.identifierForVendor`
+    /// where available). It exists so tests can control generation
+    /// deterministically: `identifierForVendor` is stable per app
+    /// installation on a given device/simulator, not per call, so two
+    /// providers backed by two empty Keychains in the *same* test process
+    /// would otherwise resolve to the same real `identifierForVendor` and
+    /// only appear "isolated" by accident on hosts where `UIKit` isn't
+    /// importable (see RIZ-65).
     static func currentDeviceId(
         defaults: UserDefaults = .standard,
-        keychain: KeychainStoring = KeychainStore()
+        keychain: KeychainStoring = KeychainStore(),
+        idGenerator: @escaping () -> String = generateDeviceId
     ) -> String {
         if let stored = keychain.read(key: deviceIdKey) {
             return stored
@@ -41,7 +52,7 @@ enum DeviceIdProvider {
             return legacy
         }
 
-        let generated = generateDeviceId()
+        let generated = idGenerator()
         keychain.write(generated, key: deviceIdKey)
         return generated
     }

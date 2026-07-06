@@ -48,10 +48,28 @@ final class DeviceIdProviderTests: XCTestCase {
         let firstKeychain = InMemoryKeychainStore()
         let secondKeychain = InMemoryKeychainStore()
 
-        let firstId = DeviceIdProvider.currentDeviceId(defaults: defaults, keychain: firstKeychain)
-        let secondId = DeviceIdProvider.currentDeviceId(defaults: makeDefaults(), keychain: secondKeychain)
+        // Use explicit `idGenerator`s rather than the production default
+        // (`UIDevice.identifierForVendor` where `UIKit` is importable): that
+        // value is stable per app install on a given device/simulator, not
+        // per call, so two providers in the same test process would
+        // otherwise resolve to the same real identifier regardless of their
+        // (empty, independent) Keychains — see RIZ-65. What this test wants
+        // to assert is that a fresh generated id, once produced, is written
+        // to the keychain it was given and never leaks into another one.
+        let firstId = DeviceIdProvider.currentDeviceId(
+            defaults: defaults,
+            keychain: firstKeychain,
+            idGenerator: { "device-one-\(UUID().uuidString)" }
+        )
+        let secondId = DeviceIdProvider.currentDeviceId(
+            defaults: makeDefaults(),
+            keychain: secondKeychain,
+            idGenerator: { "device-two-\(UUID().uuidString)" }
+        )
 
         XCTAssertNotEqual(firstId, secondId)
+        XCTAssertEqual(firstKeychain.read(key: "com.rizeclone.mobile.deviceId"), firstId)
+        XCTAssertEqual(secondKeychain.read(key: "com.rizeclone.mobile.deviceId"), secondId)
     }
 
     // MARK: Keychain migration (RIZ-46)
