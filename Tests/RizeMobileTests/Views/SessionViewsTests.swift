@@ -3,7 +3,19 @@ import XCTest
 
 @MainActor
 final class SessionViewsTests: XCTestCase {
+    /// Groups a freshly built `SessionEngine` with the clock used to
+    /// construct it, so tests can drive time deterministically (see
+    /// `SessionEngineTests.MadeEngine` for the same pattern).
+    private struct MadeEngine {
+        let engine: SessionEngine
+        let clock: TestClock
+    }
+
     private func makeEngine() throws -> SessionEngine {
+        try makeEngineWithClock().engine
+    }
+
+    private func makeEngineWithClock() throws -> MadeEngine {
         let database = try AppDatabase.inMemory()
         let clock = TestClock()
         let store = GRDBLocalStore(
@@ -12,7 +24,8 @@ final class SessionViewsTests: XCTestCase {
             clock: clock,
             uuidGenerator: UUIDv7Generator(clock: clock)
         )
-        return SessionEngine(store: store, clock: clock, clockStateStore: InMemorySessionClockStore())
+        let engine = SessionEngine(store: store, clock: clock, clockStateStore: InMemorySessionClockStore())
+        return MadeEngine(engine: engine, clock: clock)
     }
 
     func testStartSessionViewInitializesWhileIdle() throws {
@@ -53,5 +66,38 @@ final class SessionViewsTests: XCTestCase {
         let view = SessionsView(engine: engine, historyViewModel: historyViewModel)
 
         XCTAssertNotNil(view.body)
+    }
+
+    // MARK: wall-clock display math (RIZ-44 M1)
+
+    func testWallClockSpanIsNowMinusStartedAt() {
+        let startedAt = Date(timeIntervalSince1970: 1000)
+        let now = startedAt.addingTimeInterval(125)
+
+        XCTAssertEqual(RunningSessionView.wallClockSpan(now: now, startedAt: startedAt), 125)
+    }
+
+    func testWallClockSpanIncludesPausedTimeUnlikeActiveElapsed() async throws {
+        let made = try makeEngineWithClock()
+        let engine = made.engine
+        let clock = made.clock
+        _ = try await engine.start(kind: .focus)
+        clock.advance(by: 30)
+        try engine.pause()
+        clock.advance(by: 100)
+
+        // Active time (SessionEngine.elapsed) freezes across the pause...
+        XCTAssertEqual(engine.elapsed(now: clock.now()), 30)
+        // ...but the wall-clock span shown as the primary timer keeps moving,
+        // matching the synced started_at/ended_at instants.
+        let startedAt = engine.state.snapshot?.startedAt ?? Date()
+        XCTAssertEqual(RunningSessionView.wallClockSpan(now: clock.now(), startedAt: startedAt), 130)
+    }
+
+    func testWallClockSpanNeverGoesNegative() {
+        let startedAt = Date(timeIntervalSince1970: 1000)
+        let now = Date(timeIntervalSince1970: 900)
+
+        XCTAssertEqual(RunningSessionView.wallClockSpan(now: now, startedAt: startedAt), 0)
     }
 }

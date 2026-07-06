@@ -1,10 +1,16 @@
 import SwiftUI
 
 /// Shows the active manual timer / focus session: elapsed time, pause/resume,
-/// and stop. Elapsed time is computed from `SessionEngine.elapsed(now:)`
-/// against a `TimelineView` tick rather than a `Timer`, so there is no timer
-/// object to invalidate/leak and the elapsed value is always a pure function
-/// of "now".
+/// and stop.
+///
+/// The recorded/synced session (`started_at`/`ended_at`) is a real wall-clock
+/// instant pair, and its recorded duration includes any paused time — so the
+/// PRIMARY timer here shows that same wall-clock span (now − startedAt) to
+/// stay aligned with what actually gets synced. The pause-excluding "active"
+/// time from `SessionEngine.elapsed(now:)` is shown only as a clearly labeled
+/// secondary line. Both are computed against a `TimelineView` tick rather
+/// than a `Timer`, so there is no timer object to invalidate/leak and both
+/// values are always a pure function of "now".
 struct RunningSessionView: View {
     var engine: SessionEngine
     var snapshot: SessionSnapshot
@@ -18,8 +24,13 @@ struct RunningSessionView: View {
                 .font(.headline)
 
             TimelineView(.periodic(from: .now, by: 1)) { context in
-                Text(Self.format(engine.elapsed(now: context.date)))
-                    .font(.system(size: 48, weight: .semibold, design: .monospaced))
+                VStack(spacing: 4) {
+                    Text(Self.format(Self.wallClockSpan(now: context.date, startedAt: snapshot.startedAt)))
+                        .font(.system(size: 48, weight: .semibold, design: .monospaced))
+                    Text("Active (excl. pauses): \(Self.format(engine.elapsed(now: context.date)))")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             if isPaused {
@@ -41,6 +52,10 @@ struct RunningSessionView: View {
             Text("Exact — timed manually, not inferred from device activity.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+
+            Text("Recorded duration includes any paused time.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .padding()
         .navigationTitle("Session")
@@ -54,6 +69,7 @@ struct RunningSessionView: View {
             Button("Stop", role: .destructive) {
                 stop()
             }
+            .disabled(engine.isMutating)
         }
     }
 
@@ -79,6 +95,14 @@ struct RunningSessionView: View {
                 errorMessage = "Couldn't stop the session. Please try again."
             }
         }
+    }
+
+    /// The wall-clock span from `startedAt` to `now`, matching the
+    /// synced `started_at`/`ended_at` instants (and thus the recorded
+    /// duration, which includes paused time) rather than the pause-excluding
+    /// active time.
+    static func wallClockSpan(now: Date, startedAt: Date) -> TimeInterval {
+        max(0, now.timeIntervalSince(startedAt))
     }
 
     private static func format(_ interval: TimeInterval) -> String {
