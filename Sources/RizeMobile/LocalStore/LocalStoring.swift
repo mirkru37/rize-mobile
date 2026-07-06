@@ -82,6 +82,17 @@ public protocol LocalStoring: Sendable {
     /// (the calendar day containing the store's current time).
     func fetchTodayData() async throws -> TodayData
 
+    /// The currently-running session (`status == .running`, not tombstoned),
+    /// regardless of which calendar day it started on.
+    ///
+    /// Unlike `fetchTodayData`, which is scoped to the calendar day
+    /// containing the store's current time, this is day-agnostic — so a
+    /// session started before midnight and still running is still found
+    /// after the day rolls over. Used by `SessionEngine.recoverRunningSession`
+    /// to correctly recover a session across a midnight boundary, and by the
+    /// dashboard's running-session banner.
+    func fetchActiveRunningSession() async throws -> FocusSessionRecord?
+
     /// Up to `limit` pending rows (events and sessions combined), ordered by
     /// `startedAt`, ready for the next sync push. `limit` must not exceed
     /// [[sync-protocol]]'s 500-items-per-batch cap.

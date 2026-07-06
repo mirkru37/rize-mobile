@@ -185,6 +185,42 @@ final class GRDBLocalStoreTests: XCTestCase {
         XCTAssertEqual(today.events.first?.appBundleId, "today.app")
     }
 
+    // MARK: fetchActiveRunningSession
+
+    func testFetchActiveRunningSessionFindsARunningSessionRegardlessOfDay() async throws {
+        let clock = TestClock()
+        let (store, _) = try makeStore(clock: clock)
+        let session = try await store.startSession(kind: .focus, projectId: nil, plannedDurationS: nil, note: nil)
+
+        // Cross a day boundary: `fetchTodayData` would no longer see this
+        // session, but `fetchActiveRunningSession` is day-agnostic.
+        clock.advance(by: 2 * 86400)
+
+        let active = try await store.fetchActiveRunningSession()
+
+        XCTAssertEqual(active?.id, session.id)
+    }
+
+    func testFetchActiveRunningSessionReturnsNilWhenNothingIsRunning() async throws {
+        let (store, _) = try makeStore()
+        let session = try await store.startSession(kind: .focus, projectId: nil, plannedDurationS: nil, note: nil)
+        _ = try await store.stopSession(id: session.id, status: .completed)
+
+        let active = try await store.fetchActiveRunningSession()
+
+        XCTAssertNil(active)
+    }
+
+    func testFetchActiveRunningSessionExcludesTombstonedSessions() async throws {
+        let (store, _) = try makeStore()
+        let session = try await store.startSession(kind: .focus, projectId: nil, plannedDurationS: nil, note: nil)
+        _ = try await store.deleteSession(id: session.id)
+
+        let active = try await store.fetchActiveRunningSession()
+
+        XCTAssertNil(active)
+    }
+
     // MARK: Unsynced batch / mark synced
 
     func testFetchUnsyncedBatchReturnsOnlyPendingRows() async throws {

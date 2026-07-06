@@ -93,22 +93,22 @@ public final class SessionEngine {
     /// a running session, so a session survives an app relaunch. Should be
     /// called once, early in the app/screen's lifecycle.
     ///
-    /// Note: this relies on `LocalStoring.fetchTodayData()`, which is scoped
-    /// to the current calendar day; a session still running across a
-    /// midnight boundary will not be recovered by this call. When no running
+    /// Uses `LocalStoring.fetchActiveRunningSession()`, which is day-agnostic,
+    /// so a session started before midnight and still running is correctly
+    /// recovered even after the calendar day has rolled over. When no running
     /// session is found, only the in-memory state is reset to `.idle` — the
-    /// persisted clock state is left intact rather than cleared, since a
-    /// future day-agnostic fetch may still need it to recover pause state.
+    /// persisted clock state is left intact rather than cleared, since it may
+    /// still be needed to recover pause state.
     public func recoverRunningSession() async throws {
         guard case .idle = state, !isMutating else { return }
 
-        let today = try await store.fetchTodayData()
+        let activeRunningSession = try await store.fetchActiveRunningSession()
 
         // A concurrent start()/stop() may have already committed a new state
         // while this call was awaiting the store above; never clobber it.
         guard case .idle = state, !isMutating else { return }
 
-        guard let running = today.sessions.first(where: { $0.status == .running && $0.deletedAt == nil }) else {
+        guard let running = activeRunningSession else {
             state = .idle
             return
         }

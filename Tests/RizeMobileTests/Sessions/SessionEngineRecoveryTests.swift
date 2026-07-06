@@ -77,6 +77,27 @@ final class SessionEngineRecoveryTests: XCTestCase {
         XCTAssertEqual(relaunchedEngine.elapsed(now: clock.now()), 10)
     }
 
+    func testRecoverRunningSessionRestoresASessionStartedBeforeMidnightAndStillRunning() async throws {
+        let made = try makeEngine()
+        let store = made.store
+        let clock = made.clock
+        let started = try await store.startSession(kind: .focus, projectId: nil, plannedDurationS: nil, note: nil)
+
+        // Cross a midnight boundary while the session is still running.
+        // `fetchTodayData` would no longer see it, but `recoverRunningSession`
+        // must still recover it via the day-agnostic `fetchActiveRunningSession`.
+        clock.advance(by: 2 * 86400)
+
+        let relaunchedEngine = SessionEngine(store: store, clock: clock, clockStateStore: InMemorySessionClockStore())
+        try await relaunchedEngine.recoverRunningSession()
+
+        guard case let .running(snapshot) = relaunchedEngine.state else {
+            return XCTFail("expected the pre-midnight session to be recovered as active")
+        }
+        XCTAssertEqual(snapshot.id, started.id)
+        XCTAssertEqual(relaunchedEngine.elapsed(now: clock.now()), 2 * 86400)
+    }
+
     func testRecoverRunningSessionIsIdleWhenNoSessionIsRunning() async throws {
         let made = try makeEngine()
         let engine = made.engine
@@ -101,7 +122,7 @@ final class SessionEngineRecoveryTests: XCTestCase {
     func testRecoverRunningSessionLeavesPersistedClockStateIntactWhenNoneIsRunning() async throws {
         let clock = TestClock()
         let store = SuspendingFakeStore()
-        store.todayDataToReturn = TodayData()
+        store.activeRunningSessionToReturn = nil
         let clockStateStore = InMemorySessionClockStore()
         let staleSessionId = UUID()
         let staleState = SessionClockState(startedAt: clock.now())
@@ -179,7 +200,7 @@ final class SessionEngineRecoveryTests: XCTestCase {
 
     func testRecoverRunningSessionDoesNotClobberASessionStartedWhileItAwaitedTheStore() async throws {
         let store = SuspendingFakeStore()
-        store.todayDataToReturn = TodayData()
+        store.activeRunningSessionToReturn = nil
         let startedAt = Date()
         store.recordToReturn = FocusSessionRecord(
             id: UUID(),
@@ -285,6 +306,10 @@ private final class SuspendingFakeStoreWrappingStop: LocalStoring, @unchecked Se
 
     func fetchTodayData() async throws -> TodayData {
         try await inner.fetchTodayData()
+    }
+
+    func fetchActiveRunningSession() async throws -> FocusSessionRecord? {
+        try await inner.fetchActiveRunningSession()
     }
 
     func fetchUnsyncedBatch(limit: Int) async throws -> UnsyncedBatch {
