@@ -34,16 +34,24 @@ echo "Extracting coverage from $RESULT_BUNDLE ..."
 
 # Human-readable per-file table (excludes nothing on its own; filtering for
 # the pass/fail decision happens against the JSON below).
-xcrun xccov view --report "$RESULT_BUNDLE" >"$TEXT_REPORT" 2>/dev/null || {
+XCCOV_TEXT_ERR="$(mktemp)"
+if ! xcrun xccov view --report "$RESULT_BUNDLE" >"$TEXT_REPORT" 2>"$XCCOV_TEXT_ERR"; then
   echo "error: failed to generate text coverage report" >&2
+  cat "$XCCOV_TEXT_ERR" >&2
+  rm -f "$XCCOV_TEXT_ERR"
   exit 1
-}
+fi
+rm -f "$XCCOV_TEXT_ERR"
 
 # Machine-readable report used for the actual threshold computation.
-xcrun xccov view --report --json "$RESULT_BUNDLE" >"$JSON_REPORT" 2>/dev/null || {
+XCCOV_JSON_ERR="$(mktemp)"
+if ! xcrun xccov view --report --json "$RESULT_BUNDLE" >"$JSON_REPORT" 2>"$XCCOV_JSON_ERR"; then
   echo "error: failed to generate JSON coverage report" >&2
+  cat "$XCCOV_JSON_ERR" >&2
+  rm -f "$XCCOV_JSON_ERR"
   exit 1
-}
+fi
+rm -f "$XCCOV_JSON_ERR"
 
 if ! command -v python3 >/dev/null 2>&1; then
   echo "error: python3 not found" >&2
@@ -105,7 +113,34 @@ total_pct = (total_covered / total_executable * 100) if total_executable else 0.
 files_with_lines = [f for f in files if f["executableLines"] > 0]
 least_covered = sorted(files_with_lines, key=lambda f: f["coverage"])[:10]
 
+target_rows = []
+for target in app_targets:
+    t_executable = 0
+    t_covered = 0
+    for f in target.get("files", []):
+        t_executable += f.get("executableLines", 0)
+        t_covered += f.get("coveredLines", 0)
+    t_pct = (t_covered / t_executable * 100) if t_executable else 0.0
+    target_rows.append(
+        {
+            "name": target.get("name", "?"),
+            "covered": t_covered,
+            "executable": t_executable,
+            "pct": t_pct,
+        }
+    )
+
 summary_lines = []
+summary_lines.append("| Target | Covered | Executable | Line coverage % |")
+summary_lines.append("| --- | --- | --- | --- |")
+for row in target_rows:
+    summary_lines.append(
+        f"| {row['name']} | {row['covered']} | {row['executable']} | {row['pct']:.2f}% |"
+    )
+summary_lines.append(
+    f"| **Total** | **{total_covered}** | **{total_executable}** | **{total_pct:.2f}%** |"
+)
+summary_lines.append("")
 summary_lines.append(f"App target line coverage: {total_pct:.2f}% (threshold: {threshold:.2f}%)")
 summary_lines.append(f"Covered lines: {total_covered} / {total_executable}")
 summary_lines.append("")
