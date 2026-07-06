@@ -100,11 +100,10 @@ final class APIClientTests: XCTestCase {
         let transport = try StubHTTPTransport(result: .success((Data(), makeResponse(statusCode: 401))))
         let client = try APIClient(config: makeConfig(), transport: transport)
 
-        await XCTAssertThrowsErrorAsync({
-            try await client.pullChanges(accessToken: "t", cursor: nil, limit: 10)
-        }) { error in
-            XCTAssertEqual(error as? APIClientError, .unauthorized)
-        }
+        await XCTAssertThrowsErrorAsync(
+            { try await client.pullChanges(accessToken: "t", cursor: nil, limit: 10) },
+            { error in XCTAssertEqual(error as? APIClientError, .unauthorized) }
+        )
     }
 
     func testNonSuccessStatusWithDecodableProblemBodyThrowsProblem() async throws {
@@ -114,37 +113,36 @@ final class APIClientTests: XCTestCase {
         let transport = try StubHTTPTransport(result: .success((Data(problemJSON.utf8), makeResponse(statusCode: 400))))
         let client = try APIClient(config: makeConfig(), transport: transport)
 
-        await XCTAssertThrowsErrorAsync({
-            try await client.pullChanges(accessToken: "t", cursor: nil, limit: 10)
-        }) { error in
-            guard case let .problem(detail) = error as? APIClientError else {
-                return XCTFail("expected .problem, got \(error)")
+        await XCTAssertThrowsErrorAsync(
+            { try await client.pullChanges(accessToken: "t", cursor: nil, limit: 10) },
+            { error in
+                guard case let .problem(detail) = error as? APIClientError else {
+                    return XCTFail("expected .problem, got \(error)")
+                }
+                XCTAssertEqual(detail.status, 400)
+                XCTAssertEqual(detail.detail, "email is required")
             }
-            XCTAssertEqual(detail.status, 400)
-            XCTAssertEqual(detail.detail, "email is required")
-        }
+        )
     }
 
     func testNonSuccessStatusWithUndecodableBodyThrowsInvalidResponse() async throws {
         let transport = try StubHTTPTransport(result: .success((Data("not json".utf8), makeResponse(statusCode: 500))))
         let client = try APIClient(config: makeConfig(), transport: transport)
 
-        await XCTAssertThrowsErrorAsync({
-            try await client.pullChanges(accessToken: "t", cursor: nil, limit: 10)
-        }) { error in
-            XCTAssertEqual(error as? APIClientError, .invalidResponse)
-        }
+        await XCTAssertThrowsErrorAsync(
+            { try await client.pullChanges(accessToken: "t", cursor: nil, limit: 10) },
+            { error in XCTAssertEqual(error as? APIClientError, .invalidResponse) }
+        )
     }
 
     func testTransportFailurePropagates() async throws {
         let transport = StubHTTPTransport(result: .failure(SyncStubError()))
         let client = try APIClient(config: makeConfig(), transport: transport)
 
-        await XCTAssertThrowsErrorAsync({
-            try await client.pullChanges(accessToken: "t", cursor: nil, limit: 10)
-        }) { error in
-            XCTAssertTrue(error is SyncStubError)
-        }
+        await XCTAssertThrowsErrorAsync(
+            { try await client.pullChanges(accessToken: "t", cursor: nil, limit: 10) },
+            { error in XCTAssertTrue(error is SyncStubError) }
+        )
     }
 }
 
