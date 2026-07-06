@@ -6,9 +6,17 @@ on:
     branches:
       - main
 
+env:
+  # RIZ-47: minimum acceptable app-target line coverage, percent. Raise this
+  # over time as coverage improves; keep it as the single knob for the gate.
+  COVERAGE_THRESHOLD: 50
+
 jobs:
   build-and-test:
     runs-on: macos-15
+    permissions:
+      contents: read
+      pull-requests: write
 
     steps:
       - name: Checkout
@@ -44,7 +52,43 @@ jobs:
             -project RizeMobile.xcodeproj \
             -scheme RizeMobile \
             -destination "platform=iOS Simulator,name=${{ steps.simulator.outputs.name }}" \
+            -enableCodeCoverage YES \
+            -resultBundlePath TestResults.xcresult \
             CODE_SIGNING_ALLOWED=NO
+
+      - name: Coverage gate
+        run: scripts/coverage-check.sh TestResults.xcresult
+
+      - name: Append coverage summary
+        if: always()
+        run: |
+          if [ -f coverage-summary.txt ]; then
+            {
+              echo "## Coverage report (RizeMobile)"
+              echo ""
+              echo '```'
+              cat coverage-summary.txt
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports-${{ github.sha }}
+          path: |
+            coverage-report.txt
+            coverage-report.json
+          if-no-files-found: warn
+
+      - name: Post coverage summary on PR
+        if: always() && github.event_name == 'pull_request'
+        continue-on-error: true
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: coverage-report
+          path: coverage-summary.txt
 
       - name: SwiftLint
         run: swiftlint --strict
