@@ -11,6 +11,10 @@ public struct UnsyncedBatch: Equatable, Sendable {
         events.count + sessions.count
     }
 
+    public var isEmpty: Bool {
+        events.isEmpty && sessions.isEmpty
+    }
+
     public init(events: [ActivityEventRecord] = [], sessions: [FocusSessionRecord] = []) {
         self.events = events
         self.sessions = sessions

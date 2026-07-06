@@ -1,6 +1,18 @@
 import XCTest
 @testable import RizeMobile
 
+/// Bundles a fresh `AuthService` with the test doubles it was built from, so
+/// call sites can assert against whichever doubles their scenario needs
+/// without `makeService` returning an oversized tuple (SwiftLint
+/// `large_tuple`).
+@MainActor
+private struct AuthServiceTestHarness {
+    let service: AuthService
+    let apiClient: MockAPIClient
+    let keychain: InMemoryKeychainStore
+    let store: SpyLocalStore
+}
+
 @MainActor
 final class AuthServiceTests: XCTestCase {
     private func makeService(
@@ -8,7 +20,7 @@ final class AuthServiceTests: XCTestCase {
         keychain: InMemoryKeychainStore = InMemoryKeychainStore(),
         store: SpyLocalStore = SpyLocalStore(),
         cursorStore: InMemorySyncCursorStore = InMemorySyncCursorStore()
-    ) -> (AuthService, MockAPIClient, InMemoryKeychainStore, SpyLocalStore) {
+    ) -> AuthServiceTestHarness {
         let service = AuthService(
             apiClient: apiClient,
             keychain: keychain,
@@ -18,7 +30,7 @@ final class AuthServiceTests: XCTestCase {
                 DeviceInfo(platform: "ios", name: "Test", model: "Test", osVersion: "17.0", appVersion: "1.0")
             }
         )
-        return (service, apiClient, keychain, store)
+        return AuthServiceTestHarness(service: service, apiClient: apiClient, keychain: keychain, store: store)
     }
 
     private func makeAuthResponse(
@@ -45,24 +57,24 @@ final class AuthServiceTests: XCTestCase {
     // MARK: Login / register
 
     func testLoginAppliesTokensAndSetsSignedInState() async throws {
-        let (service, apiClient, keychain, _) = makeService()
-        apiClient.loginResult = .success(makeAuthResponse(email: "a@b.com"))
+        let harness = makeService()
+        harness.apiClient.loginResult = .success(makeAuthResponse(email: "a@b.com"))
 
-        try await service.login(email: "a@b.com", password: "password123")
+        try await harness.service.login(email: "a@b.com", password: "password123")
 
-        XCTAssertEqual(service.state, .signedIn(email: "a@b.com"))
-        XCTAssertEqual(keychain.read(key: "com.rizeclone.mobile.refreshToken"), "rt_1")
-        let token = try await service.validAccessToken()
+        XCTAssertEqual(harness.service.state, .signedIn(email: "a@b.com"))
+        XCTAssertEqual(harness.keychain.read(key: "com.rizeclone.mobile.refreshToken"), "rt_1")
+        let token = try await harness.service.validAccessToken()
         XCTAssertEqual(token, "access-1")
     }
 
     func testRegisterAppliesTokensAndSetsSignedInState() async throws {
-        let (service, apiClient, _, _) = makeService()
-        apiClient.registerResult = .success(makeAuthResponse(email: "new@user.com"))
+        let harness = makeService()
+        harness.apiClient.registerResult = .success(makeAuthResponse(email: "new@user.com"))
 
-        try await service.register(email: "new@user.com", password: "password123")
+        try await harness.service.register(email: "new@user.com", password: "password123")
 
-        XCTAssertEqual(service.state, .signedIn(email: "new@user.com"))
+        XCTAssertEqual(harness.service.state, .signedIn(email: "new@user.com"))
     }
 
     // MARK: Bootstrap
@@ -71,48 +83,48 @@ final class AuthServiceTests: XCTestCase {
         let keychain = InMemoryKeychainStore()
         keychain.write("rt_existing", key: "com.rizeclone.mobile.refreshToken")
         keychain.write("existing@user.com", key: "com.rizeclone.mobile.signedInEmail")
-        let (service, _, _, _) = makeService(keychain: keychain)
+        let harness = makeService(keychain: keychain)
 
-        service.bootstrap()
+        harness.service.bootstrap()
 
-        XCTAssertEqual(service.state, .signedIn(email: "existing@user.com"))
+        XCTAssertEqual(harness.service.state, .signedIn(email: "existing@user.com"))
     }
 
     func testBootstrapLeavesSignedOutWhenNoRefreshTokenIsPersisted() {
-        let (service, _, _, _) = makeService()
+        let harness = makeService()
 
-        service.bootstrap()
+        harness.service.bootstrap()
 
-        XCTAssertEqual(service.state, .signedOut)
+        XCTAssertEqual(harness.service.state, .signedOut)
     }
 
     // MARK: Logout
 
     func testLogoutClearsAccessTokenKeychainAndWipesLocalData() async throws {
-        let (service, apiClient, keychain, store) = makeService()
-        apiClient.loginResult = .success(makeAuthResponse())
-        try await service.login(email: "a@b.com", password: "password123")
+        let harness = makeService()
+        harness.apiClient.loginResult = .success(makeAuthResponse())
+        try await harness.service.login(email: "a@b.com", password: "password123")
 
-        await service.logout()
+        await harness.service.logout()
 
-        XCTAssertEqual(service.state, .signedOut)
-        XCTAssertNil(keychain.read(key: "com.rizeclone.mobile.refreshToken"))
-        XCTAssertEqual(store.wipeAllDataCallCount, 1)
-        XCTAssertEqual(apiClient.logoutCallCount, 1)
+        XCTAssertEqual(harness.service.state, .signedOut)
+        XCTAssertNil(harness.keychain.read(key: "com.rizeclone.mobile.refreshToken"))
+        XCTAssertEqual(harness.store.wipeAllDataCallCount, 1)
+        XCTAssertEqual(harness.apiClient.logoutCallCount, 1)
     }
 
     func testLogoutIsBestEffortEvenIfTheServerCallFails() async throws {
-        let (service, apiClient, keychain, store) = makeService()
-        apiClient.loginResult = .success(makeAuthResponse())
-        try await service.login(email: "a@b.com", password: "password123")
-        apiClient.logoutResult = .failure(SyncStubError())
+        let harness = makeService()
+        harness.apiClient.loginResult = .success(makeAuthResponse())
+        try await harness.service.login(email: "a@b.com", password: "password123")
+        harness.apiClient.logoutResult = .failure(SyncStubError())
 
-        await service.logout()
+        await harness.service.logout()
 
         // Local sign-out must complete regardless of the network outcome.
-        XCTAssertEqual(service.state, .signedOut)
-        XCTAssertNil(keychain.read(key: "com.rizeclone.mobile.refreshToken"))
-        XCTAssertEqual(store.wipeAllDataCallCount, 1)
+        XCTAssertEqual(harness.service.state, .signedOut)
+        XCTAssertNil(harness.keychain.read(key: "com.rizeclone.mobile.refreshToken"))
+        XCTAssertEqual(harness.store.wipeAllDataCallCount, 1)
     }
 
     /// RIZ-46 H1: logout must reset the pull cursor alongside the local
@@ -122,11 +134,11 @@ final class AuthServiceTests: XCTestCase {
     func testLogoutResetsSyncCursor() async throws {
         let cursorStore = InMemorySyncCursorStore()
         cursorStore.saveCursor("cursor-123")
-        let (service, apiClient, _, _) = makeService(cursorStore: cursorStore)
-        apiClient.loginResult = .success(makeAuthResponse())
-        try await service.login(email: "a@b.com", password: "password123")
+        let harness = makeService(cursorStore: cursorStore)
+        harness.apiClient.loginResult = .success(makeAuthResponse())
+        try await harness.service.login(email: "a@b.com", password: "password123")
 
-        await service.logout()
+        await harness.service.logout()
 
         XCTAssertNil(cursorStore.loadCursor())
     }
@@ -137,12 +149,12 @@ final class AuthServiceTests: XCTestCase {
     func testLogoutResetsSyncCursorEvenIfTheServerCallFails() async throws {
         let cursorStore = InMemorySyncCursorStore()
         cursorStore.saveCursor("cursor-456")
-        let (service, apiClient, _, _) = makeService(cursorStore: cursorStore)
-        apiClient.loginResult = .success(makeAuthResponse())
-        try await service.login(email: "a@b.com", password: "password123")
-        apiClient.logoutResult = .failure(SyncStubError())
+        let harness = makeService(cursorStore: cursorStore)
+        harness.apiClient.loginResult = .success(makeAuthResponse())
+        try await harness.service.login(email: "a@b.com", password: "password123")
+        harness.apiClient.logoutResult = .failure(SyncStubError())
 
-        await service.logout()
+        await harness.service.logout()
 
         XCTAssertNil(cursorStore.loadCursor())
     }
@@ -152,14 +164,14 @@ final class AuthServiceTests: XCTestCase {
     func testValidAccessTokenRefreshesLazilyWhenNoneHeldInMemory() async throws {
         let keychain = InMemoryKeychainStore()
         keychain.write("rt_existing", key: "com.rizeclone.mobile.refreshToken")
-        let (service, apiClient, _, _) = makeService(keychain: keychain)
-        apiClient.refreshResults = [.success(makeAuthResponse(accessToken: "fresh-token"))]
-        service.bootstrap()
+        let harness = makeService(keychain: keychain)
+        harness.apiClient.refreshResults = [.success(makeAuthResponse(accessToken: "fresh-token"))]
+        harness.service.bootstrap()
 
-        let token = try await service.validAccessToken()
+        let token = try await harness.service.validAccessToken()
 
         XCTAssertEqual(token, "fresh-token")
-        XCTAssertEqual(apiClient.refreshCallCount, 1)
+        XCTAssertEqual(harness.apiClient.refreshCallCount, 1)
     }
 
     /// Concurrent callers landing on `refreshAccessToken()` while a refresh
@@ -168,32 +180,32 @@ final class AuthServiceTests: XCTestCase {
     func testRefreshAccessTokenIsSingleFlightForConcurrentCallers() async throws {
         let keychain = InMemoryKeychainStore()
         keychain.write("rt_existing", key: "com.rizeclone.mobile.refreshToken")
-        let (service, apiClient, _, _) = makeService(keychain: keychain)
-        apiClient.refreshResults = [.success(makeAuthResponse(accessToken: "fresh-token"))]
+        let harness = makeService(keychain: keychain)
+        harness.apiClient.refreshResults = [.success(makeAuthResponse(accessToken: "fresh-token"))]
 
-        async let first = service.refreshAccessToken()
-        async let second = service.refreshAccessToken()
+        async let first = harness.service.refreshAccessToken()
+        async let second = harness.service.refreshAccessToken()
         let (firstToken, secondToken) = try await (first, second)
 
         XCTAssertEqual(firstToken, "fresh-token")
         XCTAssertEqual(secondToken, "fresh-token")
-        XCTAssertEqual(apiClient.refreshCallCount, 1)
+        XCTAssertEqual(harness.apiClient.refreshCallCount, 1)
     }
 
     func testFailedRefreshWithUnauthorizedLogsOutAndWipesData() async {
         let keychain = InMemoryKeychainStore()
         keychain.write("rt_existing", key: "com.rizeclone.mobile.refreshToken")
-        let (service, apiClient, _, store) = makeService(keychain: keychain)
-        apiClient.refreshResults = [.failure(APIClientError.unauthorized)]
-        service.bootstrap()
+        let harness = makeService(keychain: keychain)
+        harness.apiClient.refreshResults = [.failure(APIClientError.unauthorized)]
+        harness.service.bootstrap()
 
         await XCTAssertThrowsErrorAsync {
-            try await service.refreshAccessToken()
+            try await harness.service.refreshAccessToken()
         }
 
-        XCTAssertEqual(service.state, .signedOut)
-        XCTAssertNil(keychain.read(key: "com.rizeclone.mobile.refreshToken"))
-        XCTAssertEqual(store.wipeAllDataCallCount, 1)
+        XCTAssertEqual(harness.service.state, .signedOut)
+        XCTAssertNil(harness.keychain.read(key: "com.rizeclone.mobile.refreshToken"))
+        XCTAssertEqual(harness.store.wipeAllDataCallCount, 1)
     }
 
     /// A transient/malformed-response failure must never sign the user out
@@ -202,17 +214,17 @@ final class AuthServiceTests: XCTestCase {
     func testFailedRefreshWithATransientErrorDoesNotLogOutOrWipeData() async {
         let keychain = InMemoryKeychainStore()
         keychain.write("rt_existing", key: "com.rizeclone.mobile.refreshToken")
-        let (service, apiClient, _, store) = makeService(keychain: keychain)
-        apiClient.refreshResults = [.failure(APIClientError.invalidResponse)]
-        service.bootstrap()
+        let harness = makeService(keychain: keychain)
+        harness.apiClient.refreshResults = [.failure(APIClientError.invalidResponse)]
+        harness.service.bootstrap()
 
         await XCTAssertThrowsErrorAsync {
-            try await service.refreshAccessToken()
+            try await harness.service.refreshAccessToken()
         }
 
         // Still signed in — the refresh token itself was never rejected.
-        XCTAssertEqual(service.state, .signedIn(email: ""))
-        XCTAssertNotNil(keychain.read(key: "com.rizeclone.mobile.refreshToken"))
-        XCTAssertEqual(store.wipeAllDataCallCount, 0)
+        XCTAssertEqual(harness.service.state, .signedIn(email: ""))
+        XCTAssertNotNil(harness.keychain.read(key: "com.rizeclone.mobile.refreshToken"))
+        XCTAssertEqual(harness.store.wipeAllDataCallCount, 0)
     }
 }
