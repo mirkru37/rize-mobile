@@ -28,6 +28,20 @@ xcconfig treats `//` as a comment delimiter anywhere on a line, so any URL value
 
 Coverage thresholds and other CI-only knobs (e.g. `COVERAGE_THRESHOLD` in the `Makefile`) are not app runtime configuration and stay in `Makefile`/CI workflow files.
 
+### Release workflow (`.github/workflows/release.yml`)
+
+Pushing a `v*` tag runs the release workflow. It always injects the backend base URL and then picks one of two build modes depending on whether signing secrets are configured:
+
+| Name | Kind | Required for | Description |
+|---|---|---|---|
+| `BACKEND_BASE_URL` | repo *variable* (Settings > Secrets and variables > Actions > Variables) | both modes | Baked into the release build's `RIZE_BACKEND_BASE_URL` Info.plist key via a generated `Config.local.xcconfig`. Falls back to `http://localhost:8080` when unset. |
+| `IOS_CERT_P12_BASE64` | secret | signed mode | Base64-encoded `.p12` distribution certificate. |
+| `IOS_CERT_PASSWORD` | secret | signed mode | Password for the `.p12` above. |
+| `IOS_PROVISIONING_PROFILE_BASE64` | secret | signed mode | Base64-encoded `.mobileprovision` file. |
+| `APPLE_TEAM_ID` | secret | signed mode | Apple Developer Team ID used for `DEVELOPMENT_TEAM`/export options. |
+
+If all four signing secrets are present, the workflow imports the certificate into a temporary keychain, installs the provisioning profile, builds a signed device archive, and exports `RizeMobile.ipa` (export method inferred from the profile). If any are absent, it falls back to the original unsigned Simulator build, published as `RizeMobile-simulator-unsigned.zip`. Both paths attach their artifact to a GitHub Release via `softprops/action-gh-release@v2`. Full device/App Store distribution is additionally bounded by the pending family-controls entitlement approval (RIZ-20).
+
 ## Documentation
 
 - [Mobile architecture](../documentation/architecture-mobile.md)
