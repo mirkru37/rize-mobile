@@ -1,12 +1,36 @@
 name: Release
 
-# Scaffolding-only release workflow (RIZ-25). This produces an UNSIGNED
-# simulator build archived as a zipped .app for internal verification
-# purposes only. There is no code signing set up yet, so no .ipa is
-# produced and nothing is published to TestFlight / the App Store.
-# Real device signing + IPA export is a later ticket, gated on the
-# Apple Developer Program setup and the family-controls entitlement
-# approval (RIZ-20).
+# RIZ-77: release workflow with backend base URL injection and conditional
+# device signing.
+#
+# Backend base URL (RIZ-77): both build modes below inject
+# `RIZE_BACKEND_BASE_URL` from the `BACKEND_BASE_URL` GitHub *repository
+# variable* (Settings > Secrets and variables > Actions > Variables) into a
+# generated `Config.local.xcconfig`, which `Config.example.xcconfig`
+# `#include?`s and which wins over its own committed default (see that
+# file). If `vars.BACKEND_BASE_URL` is unset, the build falls back to the
+# same `http://localhost:8080` default used elsewhere in this repo. See
+# `BackendConfigProvider` (Sources/RizeMobile/Sync/BackendConfig.swift) for
+# how the app reads the resulting Info.plist key at runtime.
+#
+# Conditional signing (RIZ-77): the `guard-signing` job below checks for
+# four secrets — IOS_CERT_P12_BASE64, IOS_CERT_PASSWORD,
+# IOS_PROVISIONING_PROFILE_BASE64, APPLE_TEAM_ID — via a job-level `env:`
+# block, because `if:` conditions cannot read `secrets.*` directly (same
+# bridging pattern as rize-backend's deploy-integration.yml guard job).
+# When all four are present, `build-signed-device-artifact` imports the
+# certificate into a temporary keychain, installs the provisioning profile,
+# builds a signed archive for a real device, and exports a `.ipa` (export
+# method inferred from the provisioning profile's entitlements/device
+# list). When any secret is absent, `build-unsigned-simulator-artifact`
+# keeps the original RIZ-25 unsigned simulator .app zip path unchanged.
+#
+# FamilyControls entitlement (RIZ-20): project.yml does not request the
+# `com.apple.developer.family-controls` entitlement yet (it is only a
+# placeholder comment there), so it cannot currently block signing. If/when
+# that entitlement is added ahead of Apple's distribution approval landing,
+# this signed path may need to gate on it explicitly — this comment is the
+# marker to revisit at that time, per RIZ-20/RIZ-77.
 
 on:
   push:
@@ -14,7 +38,37 @@ on:
       - "v*"
 
 jobs:
+  # Guard job: runs unconditionally and first. `if:` conditions cannot read
+  # `secrets.*` directly, so this bridges the check through a job-level
+  # `env:` block and an output, mirroring rize-backend's
+  # deploy-integration.yml guard-job pattern.
+  guard-signing:
+    name: Guard - iOS signing credentials check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      configured: ${{ steps.check.outputs.configured }}
+    steps:
+      - name: Check iOS distribution signing secrets
+        id: check
+        env:
+          IOS_CERT_P12_BASE64: ${{ secrets.IOS_CERT_P12_BASE64 }}
+          IOS_CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
+          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$IOS_CERT_P12_BASE64" ] && [ -n "$IOS_CERT_PASSWORD" ] && [ -n "$IOS_PROVISIONING_PROFILE_BASE64" ] && [ -n "$APPLE_TEAM_ID" ]; then
+            echo "iOS distribution signing secrets are present — building a signed device .ipa."
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "iOS distribution signing secrets are absent — falling back to the unsigned simulator build. See README.md#configuration for the secrets required to enable signed releases."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build-unsigned-simulator-artifact:
+    name: Build unsigned simulator artifact
+    needs: guard-signing
+    if: needs.guard-signing.outputs.configured != 'true'
     runs-on: macos-15
 
     steps:
@@ -23,6 +77,19 @@ jobs:
 
       - name: Install tooling
         run: brew install xcodegen
+
+      - name: Configure backend base URL
+        env:
+          BACKEND_BASE_URL: ${{ vars.BACKEND_BASE_URL }}
+        run: |
+          URL="${BACKEND_BASE_URL:-http://localhost:8080}"
+          # xcconfig treats `//` as a comment delimiter anywhere on a line
+          # (see Config.example.xcconfig) — escape it with `$()` so a raw
+          # `http://...` value isn't silently truncated to `http:`.
+          # The sed replacement below is a literal $() escape, not a shell expansion.
+          # shellcheck disable=SC2016
+          ESCAPED_URL=$(printf '%s' "$URL" | sed 's#//#/$()/#')
+          echo "RIZE_BACKEND_BASE_URL = ${ESCAPED_URL}" > Config.local.xcconfig
 
       - name: Generate Xcode project
         run: xcodegen generate
@@ -66,6 +133,169 @@ jobs:
             This is a scaffolding-only artifact for internal verification:
             it targets the iOS Simulator only, is not code-signed, and is
             NOT an installable .ipa for real devices. Device signing and
-            App Store / TestFlight distribution are tracked in a later
-            ticket, pending Apple Developer Program setup and the
+            App Store / TestFlight distribution require the
+            IOS_CERT_P12_BASE64, IOS_CERT_PASSWORD,
+            IOS_PROVISIONING_PROFILE_BASE64, and APPLE_TEAM_ID secrets to
+            be configured on this repo (see README.md#configuration); once
+            present, this same workflow produces a signed RizeMobile.ipa
+            instead. Full distribution is additionally pending the
             family-controls entitlement approval (RIZ-20).
+
+  build-signed-device-artifact:
+    name: Build signed device artifact
+    needs: guard-signing
+    if: needs.guard-signing.outputs.configured == 'true'
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tooling
+        run: brew install xcodegen
+
+      - name: Configure backend base URL
+        env:
+          BACKEND_BASE_URL: ${{ vars.BACKEND_BASE_URL }}
+        run: |
+          URL="${BACKEND_BASE_URL:-http://localhost:8080}"
+          # xcconfig treats `//` as a comment delimiter anywhere on a line
+          # (see Config.example.xcconfig) — escape it with `$()` so a raw
+          # `http://...` value isn't silently truncated to `http:`.
+          # The sed replacement below is a literal $() escape, not a shell expansion.
+          # shellcheck disable=SC2016
+          ESCAPED_URL=$(printf '%s' "$URL" | sed 's#//#/$()/#')
+          echo "RIZE_BACKEND_BASE_URL = ${ESCAPED_URL}" > Config.local.xcconfig
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Import signing certificate into temporary keychain
+        env:
+          IOS_CERT_P12_BASE64: ${{ secrets.IOS_CERT_P12_BASE64 }}
+          IOS_CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD=$(uuidgen)
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+
+          echo -n "$IOS_CERT_P12_BASE64" | base64 --decode -o "$CERT_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$IOS_CERT_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychain -d user -s "$KEYCHAIN_PATH" "$(security list-keychains -d user | sed 's/"//g' | xargs)"
+
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+      - name: Install provisioning profile
+        env:
+          IOS_PROVISIONING_PROFILE_BASE64: ${{ secrets.IOS_PROVISIONING_PROFILE_BASE64 }}
+        run: |
+          PROFILE_PATH="$RUNNER_TEMP/profile.mobileprovision"
+          PROFILE_PLIST_PATH="$RUNNER_TEMP/profile.plist"
+          PROFILES_DIR="$HOME/Library/MobileDevice/Provisioning Profiles"
+
+          echo -n "$IOS_PROVISIONING_PROFILE_BASE64" | base64 --decode -o "$PROFILE_PATH"
+          security cms -D -i "$PROFILE_PATH" > "$PROFILE_PLIST_PATH"
+
+          UUID=$(/usr/libexec/PlistBuddy -c "Print :UUID" "$PROFILE_PLIST_PATH")
+          mkdir -p "$PROFILES_DIR"
+          cp "$PROFILE_PATH" "$PROFILES_DIR/$UUID.mobileprovision"
+
+          # Infer the export method from the profile's own entitlements,
+          # per RIZ-77's "export method per the profile" requirement:
+          # development profiles carry get-task-allow=true; ad-hoc profiles
+          # enumerate specific devices without get-task-allow; anything
+          # else is an app-store distribution profile.
+          GET_TASK_ALLOW="false"
+          if /usr/libexec/PlistBuddy -c "Print :Entitlements:get-task-allow" "$PROFILE_PLIST_PATH" 2>/dev/null | grep -qi true; then
+            GET_TASK_ALLOW="true"
+          fi
+          HAS_DEVICES="false"
+          if /usr/libexec/PlistBuddy -c "Print :ProvisionedDevices" "$PROFILE_PLIST_PATH" >/dev/null 2>&1; then
+            HAS_DEVICES="true"
+          fi
+
+          if [ "$GET_TASK_ALLOW" = "true" ]; then
+            EXPORT_METHOD="development"
+          elif [ "$HAS_DEVICES" = "true" ]; then
+            EXPORT_METHOD="ad-hoc"
+          else
+            EXPORT_METHOD="app-store"
+          fi
+
+          echo "PROFILE_UUID=$UUID" >> "$GITHUB_ENV"
+          echo "EXPORT_METHOD=$EXPORT_METHOD" >> "$GITHUB_ENV"
+
+      - name: Build signed archive
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          xcodebuild archive \
+            -project RizeMobile.xcodeproj \
+            -scheme RizeMobile \
+            -configuration Release \
+            -archivePath build/RizeMobile.xcarchive \
+            -destination "generic/platform=iOS" \
+            CODE_SIGN_STYLE=Manual \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            PROVISIONING_PROFILE="$PROFILE_UUID" \
+            OTHER_CODE_SIGN_FLAGS="--keychain $KEYCHAIN_PATH"
+
+      - name: Export .ipa
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          EXPORT_OPTIONS_PATH="$RUNNER_TEMP/ExportOptions.plist"
+          cat > "$EXPORT_OPTIONS_PATH" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>method</key>
+              <string>${EXPORT_METHOD}</string>
+              <key>teamID</key>
+              <string>${APPLE_TEAM_ID}</string>
+              <key>signingStyle</key>
+              <string>manual</string>
+          </dict>
+          </plist>
+          PLIST
+
+          xcodebuild -exportArchive \
+            -archivePath build/RizeMobile.xcarchive \
+            -exportPath build/export \
+            -exportOptionsPlist "$EXPORT_OPTIONS_PATH"
+
+          IPA_PATH=$(find build/export -maxdepth 1 -name "*.ipa" -print -quit)
+          if [ -z "$IPA_PATH" ]; then
+            echo "No .ipa product found" >&2
+            exit 1
+          fi
+          cp "$IPA_PATH" RizeMobile.ipa
+
+      - name: Clean up temporary keychain
+        if: always()
+        run: |
+          if [ -n "$KEYCHAIN_PATH" ] && [ -f "$KEYCHAIN_PATH" ]; then
+            security delete-keychain "$KEYCHAIN_PATH" || true
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: RizeMobile.ipa
+          body: |
+            Signed iOS device build of RizeMobile (tag ${{ github.ref_name }}), export method `${{ env.EXPORT_METHOD }}`.
+
+            This .ipa is signed with the certificate/provisioning profile
+            configured via this repo's IOS_CERT_P12_BASE64,
+            IOS_CERT_PASSWORD, IOS_PROVISIONING_PROFILE_BASE64, and
+            APPLE_TEAM_ID secrets. Installability is bounded by that
+            provisioning profile's device/distribution scope. The
+            family-controls entitlement is not yet requested by this app
+            target (pending RIZ-20 approval), so it does not affect this
+            build.
