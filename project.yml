@@ -50,6 +50,9 @@ targets:
         UIApplicationSceneManifest:
           UIApplicationSupportsMultipleScenes: false
         RIZE_BACKEND_BASE_URL: "$(RIZE_BACKEND_BASE_URL)"
+        # ATS: allows plain-HTTP to the integration backend (bare-IP host). MUST be removed/replaced with TLS before any App Store/TestFlight submission.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
 
     # --------------------------------------------------------------------
     # Placeholder: DeviceActivity / FamilyControls extension targets
