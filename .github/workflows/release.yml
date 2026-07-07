@@ -202,6 +202,7 @@ jobs:
           security cms -D -i "$PROFILE_PATH" > "$PROFILE_PLIST_PATH"
 
           UUID=$(/usr/libexec/PlistBuddy -c "Print :UUID" "$PROFILE_PLIST_PATH")
+          PROFILE_NAME=$(/usr/libexec/PlistBuddy -c "Print :Name" "$PROFILE_PLIST_PATH")
           mkdir -p "$PROFILES_DIR"
           cp "$PROFILE_PATH" "$PROFILES_DIR/$UUID.mobileprovision"
 
@@ -227,8 +228,11 @@ jobs:
             EXPORT_METHOD="app-store"
           fi
 
-          echo "PROFILE_UUID=$UUID" >> "$GITHUB_ENV"
-          echo "EXPORT_METHOD=$EXPORT_METHOD" >> "$GITHUB_ENV"
+          {
+            echo "PROFILE_UUID=$UUID"
+            echo "PROFILE_NAME=$PROFILE_NAME"
+            echo "EXPORT_METHOD=$EXPORT_METHOD"
+          } >> "$GITHUB_ENV"
 
       - name: Build signed archive
         env:
@@ -261,6 +265,11 @@ jobs:
               <string>${APPLE_TEAM_ID}</string>
               <key>signingStyle</key>
               <string>manual</string>
+              <key>provisioningProfiles</key>
+              <dict>
+                  <key>com.rizeclone.mobile</key>
+                  <string>${PROFILE_NAME}</string>
+              </dict>
           </dict>
           </plist>
           PLIST
